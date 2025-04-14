@@ -56,9 +56,8 @@ def cross_validation_model(X_train, y_train, params, cv_folds=3):
 
     # Update params for binary/multi-class classification
     updates = {
-        'objective': 'binary:logistic' if BINARY else 'multi:softmax',
-        'num_class': None if BINARY else len(np.unique(y_train)),
-        'eval_metric': ['logloss', 'auc'] if BINARY else ['mlogloss', 'merror'],
+        'objective': 'reg:squarederror', # Regression objective
+        'eval_metric':'rmse',           # RMSE for regression
         'tree_method': 'hist',
         'device': 'cuda'
     }
@@ -74,21 +73,15 @@ def cross_validation_model(X_train, y_train, params, cv_folds=3):
         dtrain=dtrain,
         num_boost_round=n_estimators,
         nfold=cv_folds,
-        stratified=True,
+        stratified=False,
         early_stopping_rounds=10,
-        metrics=params['eval_metric'],
+        metrics='rmse',
         seed=42
     )
 
     # Extract the final results
-    if BINARY:
-        final_logloss = cv_results['test-logloss-mean'].iloc[-1]
-        final_auc = cv_results['test-auc-mean'].iloc[-1]
-        return final_logloss, final_auc
-    else:
-        final_mlogloss = cv_results['test-mlogloss-mean'].iloc[-1]
-        final_merror = cv_results['test-merror-mean'].iloc[-1]
-        return final_mlogloss, final_merror
+    final_rmse = cv_results['test-rmse-mean'].iloc[-1]
+    return final_rmse
     
 
 def manual_grid_search(X_train, y_train, cv_folds=3):
@@ -98,30 +91,20 @@ def manual_grid_search(X_train, y_train, cv_folds=3):
     # Generate all possible hyperparameter combinations
     hyperparameter_combinations = generate_hyperparameter_combinations()
 
-    best_score = -float('inf') if BINARY else float('inf') # higher auc is better, lower mlogloss is better
+    best_score = float('inf') # Lower RMSE is better
     best_params = None
 
     for params in hyperparameter_combinations: 
         print(f"Evaluating parameters: {params}")
 
         # Perform k-fold cross-validation
-        if BINARY: 
-            mean_logloss, mean_auc = cross_validation_model(X_train, y_train, params, cv_folds)
-            print(f"Mean CV Log Loss: {mean_logloss:.4f}, Mean CV AUC: {mean_auc:.4f}")
+        mean_rmse = cross_validation_model(X_train, y_train, params, cv_folds)
+        print(f"Mean CV RMSE: {mean_rmse:.4f}")
 
-            # Select best on the highest AUC
-            if mean_auc > best_score:
-                best_score = mean_auc
-                best_params = params
-
-        else:
-            mean_mlogloss, mean_merror = cross_validation_model(X_train, y_train, params, cv_folds)
-            print(f"Mean CV Multi-Class Log Loss: {mean_mlogloss:.4f}, Mean CV Multi-Class Error: {mean_merror:.4f}")
-
-            # Select best on the lowest mlogloss
-            if mean_mlogloss < best_score:
-                best_score = mean_mlogloss
-                best_params = params
+        # Select best on the lowest RMSE
+        if mean_rmse < best_score:
+            best_score = mean_rmse
+            best_params = params
 
     print("\n-------------------------------------")
     print("Best parameters found:", best_params)
@@ -133,48 +116,44 @@ def manual_grid_search(X_train, y_train, cv_folds=3):
 
 def train_final_model(X_train, X_val, y_train, y_val, best_params):
     """
-    Train the final model using the best hyperparameters.
+    Train the final regression model using the best hyperparameters.
     """
-    print("\nTraining final model with best hyperparameters...")
+    print("\nTraining final regression model with best hyperparameters...")
 
-    # Update the best_params
+    # Update the best_params for regression
     updates = {
-        'objective': 'binary:logistic' if BINARY else 'multi:softmax',
-        'num_class': None if BINARY else len(np.unique(y_train)),
-        'eval_metric': ['logloss', 'auc'] if BINARY else ['mlogloss', 'merror'],
+        'objective': 'reg:squarederror',  # Regression objective
+        'eval_metric': 'rmse',           # RMSE for regression
         'tree_method': 'hist',
-        'device': 'cuda', 
-        'early_stopping_rounds': 10
+        'early_stopping_rounds': 10,  # Early stopping based on validation RMSE
+        'device': 'cuda',
     }
     best_params = copy_and_update_params(best_params, updates)
 
     # Define the model
-    final_model = xgb.XGBClassifier(
+    final_model = xgb.XGBRegressor(
         **best_params
     )
 
-    # Fit the model
+    # Fit the model with early stopping
     final_model.fit(
         X_train, y_train,
-        eval_set=[(X_val, y_val)],
+        eval_set=[(X_val, y_val)],  # Validation set for early stopping
         verbose=True
     )
 
     # Get the best iteration
-    best_iteration = final_model.best_iteration
+    best_iteration = final_model.get_booster().best_iteration
 
-    # retrain the model with the best iteration
+    # Retrain the model with the best iteration
     if best_iteration is not None:
         print(f"\nRetraining the model with the best iteration: {best_iteration}")
-        final_model.n_estimators = best_iteration+1
+        final_model.set_params(n_estimators=best_iteration + 1)
         final_model.fit(
             X_train, y_train,
             eval_set=[(X_val, y_val)],
             verbose=True
         )
 
-    # model_filename = save_trained_model(final_model, timestamp)
-
-    # print(f"\nFinal model trained and saved to '{model_filename}'.")
-
+    # Return the trained model
     return final_model
