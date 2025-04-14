@@ -22,7 +22,7 @@ MODELS_FOLDER = os.path.join(ROOT_DIR, "saved_models")                #
 # ---------------------------------------------------------------------
 
 # color fundus photography (CFP) dataset                                
-CSV_PATH = r"data\new_cfp_features_fully_labelled.csv"
+CSV_PATH = r"data/new_cfp_features_fully_labelled.csv"
 
 # optical coherence tomography (OCT) dataset                        
 # CSV_PATH = r"data\RetFound_LF_all_OCT_fully_labelled.csv"
@@ -38,13 +38,13 @@ MACHINE_REGION = "maestro2_3d_macula"
 
 # Hyperparameter tuning phases
 # Phase 1
-LEARNING_RATE = 0.1  # 0.01 - 0.3
+LEARNING_RATE = 0.2275  # 0.01 - 0.3
 NUM_ROUND = 100 # 100 - 1000
 
 # Phase 2
-MAX_DEPTH = 6 # 3 - 10
-MIN_CHILD_WEIGHT = 1 # 1 - 10
-GAMMA = 0 # 0 - 5
+MAX_DEPTH = 4 # 3 - 10
+MIN_CHILD_WEIGHT = 3 # 1 - 10
+GAMMA = 0.0 # 0 - 5
 
 # Phase 3
 REG_LAMBDA = 1 # 1 - 10
@@ -52,5 +52,5 @@ REG_ALPHA = 0 # 0 - 10
 
 # Phase 4
 SUBSAMPLE = 1.0 # 0.5 - 1.0
-COLSAMPLE_BYTREE = 1.0 # 0.5 - 1.0
-COLSAMPLE_BYLEVEL = 1.0 # 0.5 - 1.0
+COLSAMPLE_BYTREE = 0.888 # 0.5 - 1.0
+COLSAMPLE_BYLEVEL = 0.888 # 0.5 - 1.0
