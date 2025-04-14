@@ -26,10 +26,10 @@ def main():
     df = load_dataset()
 
     # Select machine region
-    features, health_conditions, recommended_split = select_machine_region(df)
+    features, etdrs_thickness, recommended_split = select_machine_region(df)
 
     # Prepare data
-    X_train, X_val, X_test, y_train, y_val, y_test = prepare_data(features, health_conditions, recommended_split)
+    X_train, X_val, X_test, y_train, y_val, y_test = prepare_data(features, etdrs_thickness, recommended_split)
 
     if not start_or_quit():
         return

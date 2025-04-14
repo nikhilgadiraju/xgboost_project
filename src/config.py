@@ -22,7 +22,7 @@ MODELS_FOLDER = os.path.join(ROOT_DIR, "saved_models")                #
 # ---------------------------------------------------------------------
 
 # color fundus photography (CFP) dataset                                
-CSV_PATH = r"data/new_cfp_features_fully_labelled.csv"
+CSV_PATH = r"/home/s440308/Documents/19_csv_preprocessing/cfp_features_etdrs_mean.csv"
 
 # optical coherence tomography (OCT) dataset                        
 # CSV_PATH = r"data\RetFound_LF_all_OCT_fully_labelled.csv"
@@ -30,16 +30,14 @@ CSV_PATH = r"data/new_cfp_features_fully_labelled.csv"
 # ---------------------------------------------------------------------
 CSV_PATH = os.path.join(ROOT_DIR, CSV_PATH)                           #
 # ---------------------------------------------------------------------
-# Comparison setting 
-BINARY = True  # False for all 4, True for healthy vs unhealthy
 
 # Machine region selection
 MACHINE_REGION = "maestro2_3d_macula"
 
 # Hyperparameter tuning phases
 # Phase 1
-LEARNING_RATE = 0.2275  # 0.01 - 0.3
-NUM_ROUND = 100 # 100 - 1000
+LEARNING_RATE = 0.05  # 0.01 - 0.3
+NUM_ROUND = 250 # 100 - 1000
 
 # Phase 2
 MAX_DEPTH = 4 # 3 - 10
