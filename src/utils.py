@@ -123,5 +123,14 @@ def training_complete_message(best_params_file_path, final_model_file_path):
     print("-------------------------------------")
     print(f"Best hyperparameters saved to {best_params_file_path}")
     print(f"Trained model saved to {final_model_file_path}")
+    print("-------------------------------------\n")
+
+def testing_complete_message(r2):
+    """
+    Display a message to indicate that the testing is complete.
+    """
+    print("\nTesting complete!")
+    print("-------------------------------------")
+    print(f"R-squared score: {r2:.4f}")
     print("-------------------------------------")
     print("Goodbye!")

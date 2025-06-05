@@ -54,8 +54,12 @@ def main():
     # Save the final model
     final_model_file_path = save_trained_model(final_model, timestamp)
 
+    # Evaluate r^2 value using final trained model
+    r2 = evaluate_model(final_model, X_test, y_test)
+
     # Message to user
     training_complete_message(best_params_file_path, final_model_file_path)
+    testing_complete_message(r2)
 
 
 if __name__ == "__main__":
