@@ -22,17 +22,24 @@ MODELS_FOLDER = os.path.join(ROOT_DIR, "saved_models")                #
 # ---------------------------------------------------------------------
 
 # color fundus photography (CFP) dataset                                
-CSV_PATH = r"/home/s440308/Documents/19_csv_preprocessing/cfp_features_etdrs_mean.csv"
+CSV_PATH = r"/home/s440308/Documents/19_csv_preprocessing/cfp_features_etdrs_mean_triton_fovea.csv"
+
+# condition dataset (measurement or condition csv)
+CONDITION_PATH = r"/home/s440308/Documents/21_statistical_analysis/measurement.csv"
 
 # optical coherence tomography (OCT) dataset                        
 # CSV_PATH = r"data\RetFound_LF_all_OCT_fully_labelled.csv"
 
 # ---------------------------------------------------------------------
 CSV_PATH = os.path.join(ROOT_DIR, CSV_PATH)                           #
+CONDITION_PATH = os.path.join(ROOT_DIR, CONDITION_PATH)               #
 # ---------------------------------------------------------------------
 
+# Choose condition being fitted
+CONDITION_CID = 3004410
+
 # Machine region selection
-MACHINE_REGION = "maestro2_3d_macula"
+MACHINE_REGION = "triton macula"
 
 # Hyperparameter tuning phases
 # Phase 1

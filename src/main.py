@@ -23,13 +23,19 @@ def main():
     welcome_message()
 
     # Load the dataset
-    df = load_dataset()
+    df = load_dataset(CSV_PATH)
+
+    # Load the condition dataset
+    condition_df = load_dataset(CONDITION_PATH)
+
+    # Add relevant condition column to the dataset
+    df, condition_label = add_condition_column(df, condition_df)
 
     # Select machine region
-    features, etdrs_thickness, recommended_split = select_machine_region(df)
+    features, health_condition, recommended_split = select_machine_region(df, condition_label)
 
     # Prepare data
-    X_train, X_val, X_test, y_train, y_val, y_test = prepare_data(features, etdrs_thickness, recommended_split)
+    X_train, X_val, X_test, y_train, y_val, y_test = prepare_data(features, health_condition, recommended_split)
 
     if not start_or_quit():
         return

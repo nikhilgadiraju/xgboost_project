@@ -10,15 +10,41 @@ import pandas as pd
 import time 
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
-from config import CSV_PATH, MACHINE_REGION
+from config import CSV_PATH, MACHINE_REGION, CONDITION_CID, CONDITION_PATH
 
-def load_dataset():
+def load_dataset(csv_string):
     """
     Load the dataset from the specified CSV file.
     """
-    return pd.read_csv(CSV_PATH)
+    return pd.read_csv(csv_string)
 
-def select_machine_region(df):
+def convert_condition(string):
+    """
+    Convert a string representation of a condition into a more usable format.
+    """
+    string = string.split(',')[1][1:] if isinstance(string, str) and (',' in string) else string
+    return string + ')' if isinstance(string, str) and string.count('(') > string.count(')') else string
+
+def add_condition_column(df, condition_df):
+    """
+    Add a condition column to the provided dataframe
+    """
+    condition_df.dropna(subset=['measurement_concept_id'], inplace=True)
+    condition_dict = condition_df.set_index(condition_df['measurement_concept_id'].astype(int))['measurement_source_value'].apply(convert_condition).to_dict()
+    condition_label = condition_dict[int(CONDITION_CID)]
+    
+    filtered_cond_df = condition_df[condition_df["measurement_concept_id"] == int(CONDITION_CID)]
+    
+    value_dict = filtered_cond_df.set_index("person_id")['value_as_number'].to_dict()
+
+    column_label = str(CONDITION_CID)
+    df[column_label] = df["id"].map(value_dict)
+    df.dropna(subset=[column_label], inplace=True)
+
+    return df, condition_label
+
+
+def select_machine_region(df, condition_label):
     """
     Select the machine region from the dataset.
     """
@@ -26,22 +52,23 @@ def select_machine_region(df):
     features_columns = df_machine_region.columns[df_machine_region.columns.str.startswith('feature_')]
 
     features = df_machine_region[features_columns]
-    etdrs_thickness = df_machine_region["etdrs_thickness"]
+    health_condition = df_machine_region[str(CONDITION_CID)]
     recommended_split = df_machine_region["recommended_split"]
 
-    print(f"User selected: {MACHINE_REGION}\n")
+    print(f"Machine selected: {MACHINE_REGION}")
+    print(f"Condition selected: {condition_label}\n")
     time.sleep(0.1)
     print(f"Features shape: {features.shape}")
-    print(f"Health conditions shape: {etdrs_thickness.shape}")
+    print(f"Health conditions shape: {health_condition.shape}")
 
-    return features, etdrs_thickness, recommended_split
+    return features, health_condition, recommended_split
 
-def prepare_data(features, etdrs_thickness, recommended_split): 
+def prepare_data(features, health_condition, recommended_split): 
     """
     Encode labels and splits data into train/test sets.
     """
     # Ensure health_conditions is numerical (if not already)
-    etdrs_thickness = pd.to_numeric(etdrs_thickness, errors='coerce')
+    health_condition = pd.to_numeric(health_condition, errors='coerce')
 
     # split into train, val, test according to recommended split
     train_mask = recommended_split == "train"
@@ -49,8 +76,8 @@ def prepare_data(features, etdrs_thickness, recommended_split):
     test_mask = recommended_split == "test"
 
     # split data
-    X_train, y_train = features[train_mask], etdrs_thickness[train_mask]
-    X_val, y_val = features[val_mask], etdrs_thickness[val_mask]
-    X_test, y_test = features[test_mask], etdrs_thickness[test_mask]
+    X_train, y_train = features[train_mask], health_condition[train_mask]
+    X_val, y_val = features[val_mask], health_condition[val_mask]
+    X_test, y_test = features[test_mask], health_condition[test_mask]
 
     return X_train, X_val, X_test, y_train, y_val, y_test
