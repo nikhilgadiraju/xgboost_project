@@ -6,6 +6,7 @@ Date: 2025-02-27
 Description: Utility functions for user interaction
 """
 
+import matplotlib.pyplot as plt
 import time 
 import json
 from config import *
@@ -115,6 +116,82 @@ def save_trained_model(model, timestamp):
     return file_path
 
 
+def plot_r2_bar_chart(r2_df, condition_dict, cid=False, save_path=None):
+    """
+    Create a bar chart from the r2_df DataFrame and optionally save it to a file.
+    The bar labels are set using the condition_dict.
+
+    Args:
+        r2_df (pd.DataFrame): DataFrame containing 'condition' and 'r2' columns.
+        condition_dict (dict): Dictionary mapping condition keys to their descriptions.
+        save_path (str, optional): File path to save the chart. If None, the chart is only displayed.
+    """
+    # Extract data for the bar chart
+    conditions = r2_df['condition'].astype(int).astype(str) # First column for x-axis labels
+    r2_values = r2_df['r2']                                  # Second column for bar heights
+
+    # Map conditions to their descriptions using condition_dict
+    condition_labels = [condition_dict.get(int(cond), cond) for cond in conditions] if not cid else conditions
+
+    # Create the bar chart
+    plt.figure(figsize=(15, 12))
+    bars = plt.bar(conditions, r2_values, color='skyblue', edgecolor='black')
+
+    # Add labels and title
+    plt.xlabel('Condition', fontsize=12)
+    plt.ylabel('R² Value', fontsize=12)
+    plt.title('R² Values by Condition', fontsize=14)
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+
+    # Add labels above positive bars and below negative bars
+    for bar, label in zip(bars, condition_labels):
+        height = bar.get_height()
+        if height >= 0:
+            # Positive bar: Place label above the bar
+            y_position = height + 0.03
+            va = 'bottom'
+        else:
+            # Negative bar: Place label below the bar
+            y_position = height - 0.03
+            va = 'top'
+
+        plt.text(
+            bar.get_x() + bar.get_width() / 2,  # X-coordinate (center of the bar)
+            y_position,                         # Y-coordinate (above or below the bar)
+            label,                              # Text to display (mapped condition label)
+            ha='center',                        # Horizontal alignment
+            va=va,                              # Vertical alignment
+            fontsize=10,                        # Font size
+            color='black',                      # Text color
+            rotation=90                         # Rotate the label vertically
+        )
+
+    # Remove x-axis tick labels since they are now above/below the bars
+    plt.xticks([])
+
+    # Adjust layout to prevent label overlap
+    plt.tight_layout()
+
+    # Save the chart to the provided file path if specified
+    if save_path:
+        plt.savefig(save_path, format='png', dpi=300)
+        print(f"Bar chart saved to {save_path}")
+
+
+def create_directory(directory_path):
+    """
+    Create a directory if it doesn't already exist.
+
+    Args:
+        directory_path (str): The path of the directory to create.
+    """
+    try:
+        os.makedirs(directory_path, exist_ok=True)
+        print(f"Directory created or already exists: {directory_path}")
+    except Exception as e:
+        print(f"Error creating directory {directory_path}: {e}")
+
+
 def training_complete_message(best_params_file_path, final_model_file_path):
     """
     Display a message to indicate that the training is complete.
@@ -123,7 +200,8 @@ def training_complete_message(best_params_file_path, final_model_file_path):
     print("-------------------------------------")
     print(f"Best hyperparameters saved to {best_params_file_path}")
     print(f"Trained model saved to {final_model_file_path}")
-    print("-------------------------------------\n")
+    print("-------------------------------------")
+
 
 def testing_complete_message(r2):
     """

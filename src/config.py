@@ -19,10 +19,13 @@ PARAMETERS_FOLDER = os.path.join(ROOT_DIR, "hyperparameters")         #
 # Models folder                                                       #
 MODELS_FOLDER = os.path.join(ROOT_DIR, "saved_models")                #
                                                                       #
+# Results folder                                                      #
+RESULTS_FOLDER = os.path.join(ROOT_DIR, "results")                    #
+                                                                      #
 # ---------------------------------------------------------------------
 
 # color fundus photography (CFP) dataset                                
-CSV_PATH = r"/home/s440308/Documents/19_csv_preprocessing/cfp_features_etdrs_mean_triton_fovea.csv"
+CSV_PATH = r"/home/s440308/Documents/19_csv_preprocessing/results_Maestro2_macula_renamed_good_quality_FINETUNED.csv"
 
 # condition dataset (measurement or condition csv)
 CONDITION_PATH = r"/home/s440308/Documents/21_statistical_analysis/measurement.csv"
@@ -35,16 +38,13 @@ CSV_PATH = os.path.join(ROOT_DIR, CSV_PATH)                           #
 CONDITION_PATH = os.path.join(ROOT_DIR, CONDITION_PATH)               #
 # ---------------------------------------------------------------------
 
-# Choose condition being fitted
-CONDITION_CID = 3004410
-
 # Machine region selection
-MACHINE_REGION = "triton macula"
+MACHINE_REGION = "maestro2_3d_macula"
 
 # Hyperparameter tuning phases
 # Phase 1
-LEARNING_RATE = 0.05  # 0.01 - 0.3
-NUM_ROUND = 250 # 100 - 1000
+LEARNING_RATE = 0.1  # 0.01 - 0.3
+NUM_ROUND = 100 # 100 - 1000
 
 # Phase 2
 MAX_DEPTH = 4 # 3 - 10

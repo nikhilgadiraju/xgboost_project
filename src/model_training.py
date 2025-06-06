@@ -9,12 +9,12 @@ on an XGBoost model with GPU support.
 
 import numpy as np
 import itertools
+import matplotlib.pyplot as plt
 import xgboost as xgb
 from sklearn.metrics import r2_score
 from sklearn.model_selection import StratifiedKFold
 from config import *
 from utils import save_trained_model, copy_and_update_params
-
 
 def to_list(param):
     """
