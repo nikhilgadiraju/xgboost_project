@@ -11,6 +11,7 @@ import time
 import json
 from config import *
 import os
+from sklearn.metrics import r2_score
 
 
 def pre_run_check():
@@ -116,6 +117,44 @@ def save_trained_model(model, timestamp):
     return file_path
 
 
+def plot_prediction_vs_actual(y_test, y_pred):
+    """
+    Creates a scatter plot of predicted vs actual values using the XGBoost model predictions.
+    
+    Args:
+        y_test (array-like): True values
+        y_pred (array-like): Predicted values from XGBoost model
+    """
+    # Calculate R² value
+    r2 = r2_score(y_test, y_pred)
+    
+    # Create figure
+    plt.figure(figsize=(10, 6))
+    
+    # Create scatter plot of actual vs predicted
+    plt.scatter(y_test, y_pred, alpha=0.5, label='Data Points', color='blue')
+    
+    # Add perfect prediction line (y=x)
+    min_val = min(y_test.min(), y_pred.min())
+    max_val = max(y_test.max(), y_pred.max())
+    plt.plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.3, label='Perfect Prediction')
+    
+    # Add labels and title
+    plt.xlabel("Actual Values")
+    plt.ylabel("Predicted Values")
+    plt.title(f"XGBoost Model Predictions vs Actual Values\nR² = {r2:.3f}")
+    
+    # Add grid and legend
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    
+    # Ensure equal aspect ratio
+    plt.axis('equal')
+    plt.tight_layout()
+    
+    return plt.gcf()
+
+
 def plot_r2_bar_chart(r2_df, condition_dict, cid=False, save_path=None):
     """
     Create a bar chart from the r2_df DataFrame and optionally save it to a file.
@@ -128,7 +167,7 @@ def plot_r2_bar_chart(r2_df, condition_dict, cid=False, save_path=None):
     """
     # Extract data for the bar chart
     conditions = r2_df['condition'].astype(int).astype(str) # First column for x-axis labels
-    r2_values = r2_df['r2']                                  # Second column for bar heights
+    r2_values = r2_df['r2']                                 # Second column for bar heights
 
     # Map conditions to their descriptions using condition_dict
     condition_labels = [condition_dict.get(int(cond), cond) for cond in conditions] if not cid else conditions

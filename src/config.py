@@ -22,6 +22,9 @@ MODELS_FOLDER = os.path.join(ROOT_DIR, "saved_models")                #
 # Results folder                                                      #
 RESULTS_FOLDER = os.path.join(ROOT_DIR, "results")                    #
                                                                       #
+# Plots folder
+PLOTS_FOLDER = os.path.join(ROOT_DIR, "plots")                        #
+                                                                      #
 # ---------------------------------------------------------------------
 
 # color fundus photography (CFP) dataset                                

@@ -14,7 +14,7 @@ import xgboost as xgb
 from sklearn.metrics import r2_score
 from sklearn.model_selection import StratifiedKFold
 from config import *
-from utils import save_trained_model, copy_and_update_params
+from utils import *
 
 def to_list(param):
     """
@@ -159,7 +159,7 @@ def train_final_model(X_train, X_val, y_train, y_val, best_params):
     # Return the trained model
     return final_model
 
-def evaluate_model(model, X_test, y_test):
+def evaluate_model(model, X_test, y_test, key=None):
     """
     Evaluate the performance of the trained model on the test dataset.
     """
@@ -172,5 +172,14 @@ def evaluate_model(model, X_test, y_test):
 
     # Calculate the R-squared value
     r2 = r2_score(y_test, y_pred)
+    
+    # Create and save/show the visualization
+    fig = plot_prediction_vs_actual(y_test, y_pred)
+    
+    if key:
+        fig.savefig(os.path.join(PLOTS_FOLDER, f'xgboost_predictions_{key}.png'))
+        plt.close(fig)
+    else:
+        plt.show()
 
     return r2

@@ -43,7 +43,7 @@ def training_loop(df, condition_df, condition_dict):
         #final_model_file_path = save_trained_model(final_model, timestamp)
 
         # Evaluate r^2 value using final trained model
-        r2 = evaluate_model(final_model, X_test, y_test)
+        r2 = evaluate_model(final_model, X_test, y_test, key)
 
         # Append the r^2 value to the dataframe
         r2_df.loc[condition_label] = [key, r2]
@@ -74,15 +74,18 @@ def main(loop=False):
     # Load condition dictionary
     condition_dict = create_condition_dict(condition_df)
 
+    # Create results directory
+    create_directory(RESULTS_FOLDER)
+
+    # Create plots directory
+    create_directory(PLOTS_FOLDER)
+
     if not start_or_quit():
         return
 
     if loop:
         # Run the model training and evaluation for a single condition
         r2_df = training_loop(df, condition_df, condition_dict)
-
-        # Create save directory
-        create_directory(RESULTS_FOLDER)
 
         # Save the r^2 results to a CSV file
         r2_df.to_csv(os.path.join(RESULTS_FOLDER, "r2_results.csv"), index=False)
@@ -101,16 +104,16 @@ def main(loop=False):
         print(f"\nR^2 values for the selected condition: {r2_df['r2'].values[0]}")
 
 if __name__ == "__main__":
-    main(loop=False)
+    main(loop=True)
     
-    # Load the condition dataset
-    condition_df = load_dataset(CONDITION_PATH)
+    # # Load the condition dataset
+    # condition_df = load_dataset(CONDITION_PATH)
 
-    # Load condition dictionary
-    condition_dict = create_condition_dict(condition_df)
+    # # Load condition dictionary
+    # condition_dict = create_condition_dict(condition_df)
 
-    # Load r2_df
-    r2_df = load_dataset(os.path.join(RESULTS_FOLDER, "r2_results.csv"))
+    # # Load r2_df
+    # r2_df = load_dataset(os.path.join(RESULTS_FOLDER, "r2_results.csv"))
 
-    # Plotting priority 
-    plot_r2_bar_chart(r2_df, condition_dict, cid=True, save_path=os.path.join(RESULTS_FOLDER, "r2_bar_chart.png"))
+    # # Plotting priority 
+    # plot_r2_bar_chart(r2_df, condition_dict, cid=True, save_path=os.path.join(RESULTS_FOLDER, "r2_bar_chart.png"))
