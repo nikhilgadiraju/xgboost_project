@@ -26,7 +26,7 @@ def training_loop(df, condition_df, condition_dict):
             df, condition_label = add_condition_column(df, condition_df, key)
 
             # Select machine region
-            features, health_condition, recommended_split = select_machine_region(df, condition_label)
+            features, health_condition, recommended_split = prepare_feature_data(df, condition_label)
 
             # Check initial class distribution
             if BINARY:
@@ -147,7 +147,7 @@ def main(loop=False):
                         if key == 4182210}
         # measurement: 3004410 (HgbA1C%)
         # condition: 4317977 (Cataracts)
-        
+
         # Run model for single condition
         metrics_df = training_loop(df, condition_df, filtered_dict)
 

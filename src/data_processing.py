@@ -65,20 +65,19 @@ def add_condition_column(df, condition_df, condition_cid):
     return df, condition_label
 
 
-def select_machine_region(df, condition_label):
+def prepare_feature_data(df, condition_label):
     """
     Select the machine region from the dataset.
     """
-    df_machine_region = df[df["machine_region"] == MACHINE_REGION]
-    features_columns = df_machine_region.columns[df_machine_region.columns.str.startswith('feature_')]
+    # Get all feature columns
+    features_columns = df.columns[df.columns.str.startswith('feature_')]
+    
+    # Extract features and health condition
+    features = df[features_columns]
+    health_condition = df["study_condition"]
+    recommended_split = df["recommended_split"]
 
-    features = df_machine_region[features_columns]
-    health_condition = df_machine_region["study_condition"]
-    recommended_split = df_machine_region["recommended_split"]
-
-    print(f"Machine selected: {MACHINE_REGION}\n")
-    time.sleep(0.1)
-    print(f"Features shape: {features.shape}")
+    print(f"\nFeatures shape: {features.shape}")
     print(f"Health conditions shape: {health_condition.shape}")
 
     return features, health_condition, recommended_split
