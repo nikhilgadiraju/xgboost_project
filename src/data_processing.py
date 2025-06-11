@@ -7,10 +7,11 @@ Description: Module for loading datasets, selecting machine regions, and prepari
 """
 
 import pandas as pd
+import numpy as np
 import time 
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
-from config import CSV_PATH, MACHINE_REGION, CONDITION_PATH
+from config import *
 
 def load_dataset(csv_string):
     """
@@ -29,26 +30,37 @@ def create_condition_dict(df):
     """
     Create a dictionary mapping measurement_concept_id to measurement_source_value.
     """
-    df.dropna(subset=['measurement_concept_id'], inplace=True)
-    condition_dict = df.set_index(df['measurement_concept_id'].astype(int))['measurement_source_value'].apply(convert_condition).to_dict()
+    csv_binary = "condition" if BINARY else "measurement"
+    df.dropna(subset=[f'{csv_binary}_concept_id'], inplace=True)
+    condition_dict = df.set_index(df[f'{csv_binary}_concept_id'].astype(int))[f'{csv_binary}_source_value'].apply(convert_condition).to_dict()
     return condition_dict
 
+# TODO: Clean up later; consider creating a separate "condition_label_convert" function
 def add_condition_column(df, condition_df, condition_cid):
     """
     Add a condition column to the provided dataframe
     """
     condition_dict = create_condition_dict(condition_df)
     condition_label = condition_dict[int(condition_cid)]
-    
-    filtered_cond_df = condition_df[condition_df["measurement_concept_id"] == int(condition_cid)]
-    
-    value_dict = filtered_cond_df.set_index("person_id")['value_as_number'].to_dict()
 
-    column_label ="study_condition"
-    df[column_label] = df["id"].map(value_dict)
-    df.dropna(subset=["study_condition"], inplace=True)
+    if BINARY:
+        filtered_cond_df = condition_df[condition_df["condition_concept_id"] == int(condition_cid)]
+        value_dict = filtered_cond_df.set_index("person_id")['condition_source_value'].to_dict()
 
-    print(f"Condition selected: {condition_label}")
+        column_label ="study_condition"
+        df[column_label] = df["id"].map(value_dict)
+        df[str(column_label)] = np.where(df[str(column_label)].notna(), 1, 0)
+
+        print(f"Condition selected: {condition_label}")
+    else:
+        filtered_cond_df = condition_df[condition_df["measurement_concept_id"] == int(condition_cid)]
+        value_dict = filtered_cond_df.set_index("person_id")['value_as_number'].to_dict()
+
+        column_label ="study_condition"
+        df[column_label] = df["id"].map(value_dict)
+        df.dropna(subset=["study_condition"], inplace=True)
+
+        print(f"Condition selected: {condition_label}")
 
     return df, condition_label
 
@@ -75,8 +87,12 @@ def prepare_data(features, health_condition, recommended_split):
     """
     Encode labels and splits data into train/test sets.
     """
-    # Ensure health_conditions is numerical (if not already)
-    health_condition = pd.to_numeric(health_condition, errors='coerce')
+    if BINARY:
+        # Ensure binary labels are 0 or 1
+        health_condition = (health_condition > 0).astype(int)
+    else:
+        # Original regression code
+        health_condition = pd.to_numeric(health_condition, errors='coerce')
 
     # split into train, val, test according to recommended split
     train_mask = recommended_split == "train"

@@ -14,8 +14,11 @@ import json
 import time
 
 def training_loop(df, condition_df, condition_dict):
-    # Initialize the r2 value dataframe
-    r2_df = pd.DataFrame(columns=['condition', 'r2'])    
+    # Initialize the output metrics value dataframe
+    if BINARY:
+        metrics_df = pd.DataFrame(columns=['condition', 'accuracy', 'auc'])
+    else:
+        metrics_df = pd.DataFrame(columns=['condition', 'r2'])
 
     for index, key, in enumerate(condition_dict.keys()):
         # Add relevant condition column to the dataset
@@ -42,78 +45,98 @@ def training_loop(df, condition_df, condition_dict):
         # Save the final model
         #final_model_file_path = save_trained_model(final_model, timestamp)
 
-        # Evaluate r^2 value using final trained model
-        r2 = evaluate_model(final_model, X_test, y_test, key)
+        if BINARY:
+            # Evaluate auc and accuracy for binary classification using final model
+            accuracy, auc_score = evaluate_model(final_model, X_test, y_test, 
+                                              key=key, 
+                                              condition_label=condition_dict[key])
 
-        # Append the r^2 value to the dataframe
-        r2_df.loc[condition_label] = [key, r2]
+            # Append the accuracy and auc score to the dataframe
+            metrics_df.loc[condition_label] = [key, accuracy, auc_score]
+            print(f"Accuracy: {accuracy:.3f}, AUC: {auc_score:.3f}")
+            
+            # Message to user with binary metrics
+            testing_complete_message((accuracy, auc_score))
+        else:
+            # Evaluate r^2 for regression using final model
+            r2 = evaluate_model(final_model, X_test, y_test, 
+                              key=key, 
+                              condition_label=condition_dict[key])
 
-        # Message to user
-        #training_complete_message(best_params_file_path, final_model_file_path)
-        testing_complete_message(r2)
+            # Append the r^2 value to the dataframe
+            metrics_df.loc[condition_label] = [key, r2]
+            print(f"R²: {r2:.3f}")
+            
+            # Message to user with regression metric
+            testing_complete_message(r2)
 
-    return r2_df
+    return metrics_df
 
 
 def main(loop=False):
     """
-    Main excution script for XGBoost tuning. 
+    Main execution script for XGBoost model training and evaluation.
+    Supports both binary classification and regression based on BINARY flag.
     """
-
+    # Perform initial checks
     if not pre_run_check():
         return
 
     welcome_message()
 
-    # Load the dataset
+    # Load datasets
     df = load_dataset(CSV_PATH)
-
-    # Load the condition dataset
     condition_df = load_dataset(CONDITION_PATH)
-
-    # Load condition dictionary
     condition_dict = create_condition_dict(condition_df)
 
-    # Create results directory
+    # Create necessary directories
     create_directory(RESULTS_FOLDER)
-
-    # Create plots directory
     create_directory(PLOTS_FOLDER)
 
     if not start_or_quit():
         return
 
     if loop:
-        # Run the model training and evaluation for a single condition
-        r2_df = training_loop(df, condition_df, condition_dict)
+        # Run the model training and evaluation for all conditions
+        metrics_df = training_loop(df, condition_df, condition_dict)
 
-        # Save the r^2 results to a CSV file
-        r2_df.to_csv(os.path.join(RESULTS_FOLDER, "r2_results.csv"), index=False)
+        # Save results to CSV with appropriate filename
+        if BINARY:
+            filename = "binary_classification_results.csv"
+            plot_filename = "binary_metrics_chart.png"
+        else:
+            filename = "regression_results.csv"
+            plot_filename = "r2_bar_chart.png"
+        
+        metrics_df.to_csv(os.path.join(RESULTS_FOLDER, filename), index=False)
 
-        # Plot r^2 bars
-        plot_r2_bar_chart(r2_df, condition_dict, cid=True, save_path=os.path.join(RESULTS_FOLDER, "r2_bar_chart.png"))
+        # Create appropriate visualization based on task type
+        if BINARY:
+            # Add function to plot binary classification metrics
+            plot_binary_metrics(metrics_df, condition_dict, 
+                              save_path=os.path.join(RESULTS_FOLDER, plot_filename))
+        else:
+            plot_r2_bar_chart(metrics_df, condition_dict, cid=True, 
+                             save_path=os.path.join(RESULTS_FOLDER, plot_filename))
     
     else: 
-        # Filter the condition_dict to only include the specified concept ID
-        filtered_dict = {key: value for key, value in condition_dict.items() if key == 3000744}
+        # Filter condition_dict for specific concept ID
+        filtered_dict = {key: value for key, value in condition_dict.items() 
+                        if key == 4182210}
+        # measurement: 3004410 (HgbA1C%)
+        # condition: 4317977 (Cataracts)
         
-        # Regenerate r2_df using the provided concept ID
-        r2_df = training_loop(df, condition_df, filtered_dict)
+        # Run model for single condition
+        metrics_df = training_loop(df, condition_df, filtered_dict)
 
-        # Print r2_df r2 value
-        print(f"\nR^2 values for the selected condition: {r2_df['r2'].values[0]}")
+        # Print results based on task type
+        if BINARY:
+            print(f"\nResults for selected condition:")
+            print(f"Accuracy: {metrics_df['accuracy'].values[0]:.3f}")
+            print(f"AUC: {metrics_df['auc'].values[0]:.3f}")
+        else:
+            print(f"\nR² value for selected condition: {metrics_df['r2'].values[0]:.3f}")
 
 if __name__ == "__main__":
     main(loop=True)
     
-    # # Load the condition dataset
-    # condition_df = load_dataset(CONDITION_PATH)
-
-    # # Load condition dictionary
-    # condition_dict = create_condition_dict(condition_df)
-
-    # # Load r2_df
-    # r2_df = load_dataset(os.path.join(RESULTS_FOLDER, "r2_results.csv"))
-
-    # # Plotting priority 
-    # plot_r2_bar_chart(r2_df, condition_dict, cid=True, save_path=os.path.join(RESULTS_FOLDER, "r2_bar_chart.png"))

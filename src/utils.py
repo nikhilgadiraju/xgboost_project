@@ -7,11 +7,13 @@ Description: Utility functions for user interaction
 """
 
 import matplotlib.pyplot as plt
+import numpy as np
+import seaborn as sns
 import time 
 import json
 from config import *
 import os
-from sklearn.metrics import r2_score
+from sklearn.metrics import r2_score, roc_curve, auc
 
 
 def pre_run_check():
@@ -117,42 +119,69 @@ def save_trained_model(model, timestamp):
     return file_path
 
 
-def plot_prediction_vs_actual(y_test, y_pred):
+def plot_roc_curve(y_true, y_pred_proba, key=None, condition_label=None):
     """
-    Creates a scatter plot of predicted vs actual values using the XGBoost model predictions.
+    Plot ROC curve for binary classification.
     
     Args:
-        y_test (array-like): True values
-        y_pred (array-like): Predicted values from XGBoost model
+        y_true: True labels
+        y_pred_proba: Predicted probabilities
+        key: Patient ID for filename
+        condition_label: Condition description for plot title
     """
-    # Calculate R² value
+    fpr, tpr, _ = roc_curve(y_true, y_pred_proba)
+    roc_auc = auc(fpr, tpr)
+    
+    fig = plt.figure(figsize=(10, 6))
+    plt.plot(fpr, tpr, color='darkorange', lw=2, 
+             label=f'ROC curve (AUC = {roc_auc:.2f})')
+    plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    
+    # Add condition label to title if provided
+    title = 'Receiver Operating Characteristic (ROC) Curve'
+    if condition_label:
+        title += f'\n{condition_label}'
+    plt.title(title)
+    
+    plt.legend(loc="lower right")
+    return fig
+
+
+def plot_prediction_vs_actual(y_test, y_pred, key=None, condition_label=None):
+    """
+    Create scatter plot of predicted vs actual values.
+    
+    Args:
+        y_test: True values
+        y_pred: Predicted values
+        key: Patient ID for filename
+        condition_label: Condition description for plot title
+    """
     r2 = r2_score(y_test, y_pred)
     
-    # Create figure
-    plt.figure(figsize=(10, 6))
+    fig = plt.figure(figsize=(10, 6))
+    plt.scatter(y_test, y_pred, alpha=0.5)
     
-    # Create scatter plot of actual vs predicted
-    plt.scatter(y_test, y_pred, alpha=0.5, label='Data Points', color='blue')
+    # Add best fit and perfect prediction lines
+    plt.plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()], 
+             'k--', alpha=0.3, label='Perfect Prediction')
     
-    # Add perfect prediction line (y=x)
-    min_val = min(y_test.min(), y_pred.min())
-    max_val = max(y_test.max(), y_pred.max())
-    plt.plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.3, label='Perfect Prediction')
-    
-    # Add labels and title
     plt.xlabel("Actual Values")
     plt.ylabel("Predicted Values")
-    plt.title(f"XGBoost Model Predictions vs Actual Values\nR² = {r2:.3f}")
     
-    # Add grid and legend
+    # Add condition label to title if provided
+    title = f"Predicted vs Actual Values\nR² = {r2:.3f}"
+    if condition_label:
+        title += f'\n{condition_label}'
+    plt.title(title)
+    
     plt.grid(True, alpha=0.3)
     plt.legend()
-    
-    # Ensure equal aspect ratio
-    plt.axis('equal')
-    plt.tight_layout()
-    
-    return plt.gcf()
+    return fig
 
 
 def plot_r2_bar_chart(r2_df, condition_dict, cid=False, save_path=None):
@@ -217,6 +246,80 @@ def plot_r2_bar_chart(r2_df, condition_dict, cid=False, save_path=None):
         print(f"Bar chart saved to {save_path}")
 
 
+def plot_binary_metrics(metrics_df, condition_dict, cid=False, save_path=None):
+    """
+    Creates a grouped bar chart comparing accuracy and AUC scores across all conditions.
+    
+    Args:
+        metrics_df (pd.DataFrame): DataFrame containing columns ['condition', 'accuracy', 'auc']
+        condition_dict (dict): Dictionary mapping condition IDs to their descriptions
+        cid (bool): If True, use condition IDs as labels instead of descriptions
+        save_path (str, optional): Path to save the plot. If None, displays the plot
+    """
+    # Set style parameters
+    plt.style.use('seaborn')
+    
+    # Create figure with appropriate size
+    fig = plt.figure(figsize=(12, 6))
+    
+    # Extract data
+    conditions = metrics_df['condition'].astype(str)
+    accuracies = metrics_df['accuracy']
+    aucs = metrics_df['auc']
+    
+    # Get x-axis positions
+    x = np.arange(len(conditions))
+    width = 0.35  # Width of bars
+    
+    # Create bars
+    ax = plt.gca()
+    rects1 = ax.bar(x - width/2, accuracies, width, label='Accuracy', 
+                    color='skyblue', edgecolor='black')
+    rects2 = ax.bar(x + width/2, aucs, width, label='AUC', 
+                    color='lightcoral', edgecolor='black')
+    
+    # Customize plot
+    plt.ylabel('Score', fontsize=12)
+    plt.title('Binary Classification Metrics by Condition', fontsize=14, pad=20)
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    
+    # Set x-axis labels
+    if cid:
+        plt.xlabel('Condition ID', fontsize=12)
+        x_labels = conditions
+    else:
+        plt.xlabel('Condition', fontsize=12)
+        x_labels = [condition_dict.get(int(cond), cond) for cond in conditions]
+    
+    plt.xticks(x, x_labels, rotation=45, ha='right')
+    
+    # Add value labels on bars
+    def add_value_labels(rects):
+        for rect in rects:
+            height = rect.get_height()
+            ax.text(rect.get_x() + rect.get_width()/2., height,
+                   f'{height:.2f}',
+                   ha='center', va='bottom', fontsize=10)
+    
+    add_value_labels(rects1)
+    add_value_labels(rects2)
+    
+    # Add legend
+    plt.legend(loc='upper right')
+    
+    # Adjust layout to prevent label cutoff
+    plt.tight_layout()
+    
+    # Save or display plot
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        print(f"Binary metrics plot saved to: {save_path}")
+        plt.close()
+    else:
+        plt.show()
+    
+    return fig
+
 def create_directory(directory_path):
     """
     Create a directory if it doesn't already exist.
@@ -242,12 +345,25 @@ def training_complete_message(best_params_file_path, final_model_file_path):
     print("-------------------------------------")
 
 
-def testing_complete_message(r2):
+def testing_complete_message(metrics):
     """
     Display a message to indicate that the testing is complete.
+    
+    Args:
+        metrics: Either a tuple (accuracy, auc) for binary classification
+                or a float for regression (r-squared)
     """
     print("\nTesting complete!")
     print("-------------------------------------")
-    print(f"R-squared score: {r2:.4f}")
+    
+    if isinstance(metrics, tuple):
+        # Binary classification metrics
+        accuracy, auc = metrics
+        print(f"Accuracy: {accuracy:.4f}")
+        print(f"AUC: {auc:.4f}")
+    else:
+        # Regression metric (R²)
+        print(f"R-squared score: {metrics:.4f}")
+    
     print("-------------------------------------")
     print("Goodbye!")

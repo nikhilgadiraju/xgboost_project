@@ -9,6 +9,12 @@ for XGBoost model tuning.
 
 import os
 
+# Binary classification for condition.csv dataset
+BINARY = True
+
+# Machine region selection
+MACHINE_REGION = "maestro2_3d_macula"
+
 # ---------------------------------------------------------------------
 # Get the root directory of the project, and go back one level        #
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))#
@@ -23,7 +29,7 @@ MODELS_FOLDER = os.path.join(ROOT_DIR, "saved_models")                #
 RESULTS_FOLDER = os.path.join(ROOT_DIR, "results")                    #
                                                                       #
 # Plots folder
-PLOTS_FOLDER = os.path.join(ROOT_DIR, "plots")                        #
+PLOTS_FOLDER = os.path.join(ROOT_DIR, "binary_plots" if BINARY else "regression_plots")                        #
                                                                       #
 # ---------------------------------------------------------------------
 
@@ -31,18 +37,12 @@ PLOTS_FOLDER = os.path.join(ROOT_DIR, "plots")                        #
 CSV_PATH = r"/home/s440308/Documents/19_csv_preprocessing/results_Maestro2_macula_renamed_good_quality_FINETUNED.csv"
 
 # condition dataset (measurement or condition csv)
-CONDITION_PATH = r"/home/s440308/Documents/21_statistical_analysis/measurement.csv"
-
-# optical coherence tomography (OCT) dataset                        
-# CSV_PATH = r"data\RetFound_LF_all_OCT_fully_labelled.csv"
+CONDITION_PATH = r"/home/s440308/Documents/21_statistical_analysis/measurement.csv" if not BINARY else r"/home/s440308/Documents/21_statistical_analysis/condition_occurrence.csv"
 
 # ---------------------------------------------------------------------
 CSV_PATH = os.path.join(ROOT_DIR, CSV_PATH)                           #
 CONDITION_PATH = os.path.join(ROOT_DIR, CONDITION_PATH)               #
 # ---------------------------------------------------------------------
-
-# Machine region selection
-MACHINE_REGION = "maestro2_3d_macula"
 
 # Hyperparameter tuning phases
 # Phase 1

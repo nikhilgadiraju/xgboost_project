@@ -28,127 +28,132 @@ def to_list(param):
 
 def generate_hyperparameter_combinations():
     """
-    Generates all possible combinations of hyperparameters.
+    Generates all possible combinations of hyperparameters for either binary classification
+    or regression based on the BINARY flag.
     """
+    # Define parameter grid with both shared and task-specific parameters
     param_grid = {
         'learning_rate': to_list(LEARNING_RATE),
         'n_estimators': to_list(NUM_ROUND),
-
         'max_depth': to_list(MAX_DEPTH),
         'min_child_weight': to_list(MIN_CHILD_WEIGHT),
         'gamma': to_list(GAMMA),
-
         'reg_lambda': to_list(REG_LAMBDA),
         'reg_alpha': to_list(REG_ALPHA),
-
         'subsample': to_list(SUBSAMPLE),
         'colsample_bytree': to_list(COLSAMPLE_BYTREE),
-        'colsample_bylevel': to_list(COLSAMPLE_BYLEVEL)
+        'colsample_bylevel': to_list(COLSAMPLE_BYLEVEL),
+        # Set appropriate objective based on task type
+        'objective': ['binary:logistic'] if BINARY else ['reg:squarederror']
     }
     return [dict(zip(param_grid.keys(), values)) for values in itertools.product(*param_grid.values())]
 
-
-def cross_validation_model(X_train, y_train, params, cv_folds=3): 
+def cross_validation_model(X_train, y_train, params, cv_folds=3):
     """
-    Performs k-fold cross-validation and return the mean accuracy.
+    Performs k-fold cross-validation and returns the mean performance metric.
+    For binary classification: Uses AUC and logloss
+    For regression: Uses RMSE
     """
-    # Convert the data into DMatrix format
+    # Convert the training data into DMatrix format for XGBoost
     dtrain = xgb.DMatrix(X_train, label=y_train)
 
-    # Update params for binary/multi-class classification
+    # Update parameters based on task type (binary classification or regression)
     updates = {
-        'objective': 'reg:squarederror', # Regression objective
-        'eval_metric':'rmse',           # RMSE for regression
-        'tree_method': 'hist',
-        'device': 'cuda'
+        'objective': 'binary:logistic' if BINARY else 'reg:squarederror',
+        'eval_metric': ['logloss', 'auc'] if BINARY else 'rmse',
+        'tree_method': 'hist',        # Use histogram-based algorithm
+        'device': 'cuda'              # Enable GPU acceleration
     }
     params = copy_and_update_params(params, updates)
 
-    # n_estimator issue
+    # Handle n_estimators separately for cross-validation
     cv_params = params.copy()
     n_estimators = cv_params.pop('n_estimators')
 
-    # Perform k-fold cross-validation
+    # Perform k-fold cross-validation with appropriate settings
     cv_results = xgb.cv(
         params=cv_params,
         dtrain=dtrain,
         num_boost_round=n_estimators,
         nfold=cv_folds,
-        stratified=False,
+        stratified=BINARY,          # Use stratified folds for binary classification
         early_stopping_rounds=10,
-        metrics='rmse',
+        metrics='auc' if BINARY else 'rmse',
         seed=42
     )
 
-    # Extract the final results
-    final_rmse = cv_results['test-rmse-mean'].iloc[-1]
-    return final_rmse
-    
+    # Extract and return the appropriate metric
+    if BINARY:
+        final_score = cv_results['test-auc-mean'].iloc[-1]
+        return -final_score  # Negative because we want to maximize AUC
+    else:
+        final_rmse = cv_results['test-rmse-mean'].iloc[-1]
+        return final_rmse
 
 def manual_grid_search(X_train, y_train, cv_folds=3):
     """
-    Performs a manual grid search for hyperparameter tuning.
+    Performs a manual grid search for hyperparameter tuning with appropriate metrics
+    based on the task type (binary classification or regression).
     """
     # Generate all possible hyperparameter combinations
     hyperparameter_combinations = generate_hyperparameter_combinations()
-
-    best_score = float('inf') # Lower RMSE is better
+    best_score = float('inf')
     best_params = None
 
-    for params in hyperparameter_combinations: 
+    # Evaluate each parameter combination
+    for params in hyperparameter_combinations:
         print(f"Evaluating parameters: {params}")
+        mean_score = cross_validation_model(X_train, y_train, params, cv_folds)
+        
+        # Print appropriate metric based on task type
+        metric_name = "AUC" if BINARY else "RMSE"
+        print(f"Mean CV {metric_name}: {abs(mean_score):.4f}")
 
-        # Perform k-fold cross-validation
-        mean_rmse = cross_validation_model(X_train, y_train, params, cv_folds)
-        print(f"Mean CV RMSE: {mean_rmse:.4f}")
-
-        # Select best on the lowest RMSE
-        if mean_rmse < best_score:
-            best_score = mean_rmse
+        # Update best parameters if score improves
+        if mean_score < best_score:
+            best_score = mean_score
             best_params = params
 
+    # Print final results
     print("\n-------------------------------------")
     print("Best parameters found:", best_params)
-    print("Best cross-validation score:", best_score)
+    print(f"Best cross-validation {'AUC' if BINARY else 'RMSE'}: {abs(best_score):.4f}")
     print("-------------------------------------")
 
     return best_params, best_score
 
-
 def train_final_model(X_train, X_val, y_train, y_val, best_params):
     """
-    Train the final regression model using the best hyperparameters.
+    Train the final model using the best hyperparameters, with appropriate settings
+    for either binary classification or regression.
     """
-    print("\nTraining final regression model with best hyperparameters...")
+    print(f"\nTraining final {'classification' if BINARY else 'regression'} model...")
 
-    # Update the best_params for regression
+    # Update parameters based on task type
     updates = {
-        'objective': 'reg:squarederror',  # Regression objective
-        'eval_metric': 'rmse',           # RMSE for regression
+        'objective': 'binary:logistic' if BINARY else 'reg:squarederror',
+        'eval_metric': ['logloss', 'auc'] if BINARY else 'rmse',
         'tree_method': 'hist',
-        'early_stopping_rounds': 10,  # Early stopping based on validation RMSE
-        'device': 'cuda',
+        'early_stopping_rounds': 10,
+        'device': 'cuda'
     }
     best_params = copy_and_update_params(best_params, updates)
 
-    # Define the model
-    final_model = xgb.XGBRegressor(
-        **best_params
-    )
+    # Initialize appropriate model type
+    model_class = xgb.XGBClassifier if BINARY else xgb.XGBRegressor
+    final_model = model_class(**best_params)
 
-    # Fit the model with early stopping
+    # Train the model with early stopping
     final_model.fit(
         X_train, y_train,
-        eval_set=[(X_val, y_val)],  # Validation set for early stopping
+        eval_set=[(X_val, y_val)],
         verbose=True
     )
 
-    # Get the best iteration
+    # Retrain with best iteration if available
     best_iteration = final_model.get_booster().best_iteration
-
-    # Retrain the model with the best iteration
     if best_iteration is not None:
-        print(f"\nRetraining the model with the best iteration: {best_iteration}")
+        print(f"\nRetraining with best iteration: {best_iteration}")
         final_model.set_params(n_estimators=best_iteration + 1)
         final_model.fit(
             X_train, y_train,
@@ -156,30 +161,40 @@ def train_final_model(X_train, X_val, y_train, y_val, best_params):
             verbose=True
         )
 
-    # Return the trained model
     return final_model
 
-def evaluate_model(model, X_test, y_test, key=None):
+def evaluate_model(model, X_test, y_test, key=None, condition_label=None):
     """
-    Evaluate the performance of the trained model on the test dataset.
+    Evaluate model performance and create appropriate visualizations based on task type.
+    For binary classification: Creates ROC curve and returns accuracy/AUC
+    For regression: Creates prediction vs actual plot and returns R²
     """
-    # Convert the test data to DMatrix
+    # Convert test data to DMatrix format
     dtest = xgb.DMatrix(X_test, label=y_test)
-
-    # Use the booster to predict with DMatrix
     booster = model.get_booster()
-    y_pred = booster.predict(dtest)
-
-    # Calculate the R-squared value
-    r2 = r2_score(y_test, y_pred)
     
-    # Create and save/show the visualization
-    fig = plot_prediction_vs_actual(y_test, y_pred)
+    if BINARY:
+        y_pred_proba = booster.predict(dtest)
+        y_pred = (y_pred_proba > 0.5).astype(int)
+        
+        from sklearn.metrics import roc_auc_score, accuracy_score
+        auc = roc_auc_score(y_test, y_pred_proba)
+        accuracy = accuracy_score(y_test, y_pred)
+        
+        # Plot ROC curve with condition label in title
+        fig = plot_roc_curve(y_test, y_pred_proba, key=key, condition_label=condition_label)
+        metric = (accuracy, auc)
+    else:
+        y_pred = booster.predict(dtest)
+        r2 = r2_score(y_test, y_pred)
+        
+        # Plot regression predictions with condition label in title
+        fig = plot_prediction_vs_actual(y_test, y_pred, key=key, condition_label=condition_label)
+        metric = r2
     
     if key:
-        fig.savefig(os.path.join(PLOTS_FOLDER, f'xgboost_predictions_{key}.png'))
+        plot_type = 'roc_curve' if BINARY else 'predictions'
+        fig.savefig(os.path.join(PLOTS_FOLDER, f'{plot_type}_patient_{key}.png'))
         plt.close(fig)
-    else:
-        plt.show()
-
-    return r2
+    
+    return metric
