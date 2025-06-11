@@ -295,7 +295,7 @@ def plot_binary_metrics(metrics_df, condition_dict, cid=False, save_path=None):
     plt.style.use('default')
     
     # Create figure with appropriate size
-    fig = plt.figure(figsize=(12, 6))
+    fig, ax = plt.subplots(figsize=(14, 6))  # Increased width from 12 to 14
     
     # Extract and clean data
     try:
@@ -341,22 +341,33 @@ def plot_binary_metrics(metrics_df, condition_dict, cid=False, save_path=None):
     
     plt.xticks(x, x_labels, rotation=45, ha='right')
     
-    # Add value labels on bars
+     # Add value labels above bars with improved positioning
     def add_value_labels(rects):
         for rect in rects:
             height = rect.get_height()
-            if not np.isnan(height):  # Only add label if height is not NaN
-                ax.text(rect.get_x() + rect.get_width()/2., height,
+            if not np.isnan(height):
+                # Add small offset to prevent overlap
+                y_offset = 0.01
+                ax.text(rect.get_x() + rect.get_width()/2., 
+                       height + y_offset,
                        f'{height:.2f}',
-                       ha='center', va='bottom', fontsize=10)
+                       ha='center', va='bottom', 
+                       fontsize=9,
+                       bbox=dict(facecolor='white', 
+                               edgecolor='none',
+                               alpha=0.7,
+                               pad=1))
     
     add_value_labels(rects1)
     add_value_labels(rects2)
     
-    # Add legend with a semi-transparent background
-    plt.legend(loc='upper right', framealpha=0.9)
+    # Place legend closer to the plot
+    plt.legend(loc='upper left',  # Place legend inside plot in upper left
+              framealpha=0.9,     # Semi-transparent background
+              bbox_to_anchor=(0.01, 0.99),  # Fine-tune position
+              ncol=1)             # Single column layout
     
-    # Adjust layout to prevent label cutoff
+    # Adjust layout without left margin adjustment
     plt.tight_layout()
     
     # Save or display plot
