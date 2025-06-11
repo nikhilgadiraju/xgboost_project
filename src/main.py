@@ -20,55 +20,71 @@ def training_loop(df, condition_df, condition_dict):
     else:
         metrics_df = pd.DataFrame(columns=['condition', 'r2'])
 
-    for index, key, in enumerate(condition_dict.keys()):
-        # Add relevant condition column to the dataset
-        df, condition_label = add_condition_column(df, condition_df, key)
+    for index, key in enumerate(condition_dict.keys()):
+        try:
+            # Add relevant condition column to the dataset
+            df, condition_label = add_condition_column(df, condition_df, key)
 
-        # Select machine region
-        features, health_condition, recommended_split = select_machine_region(df, condition_label)
+            # Select machine region
+            features, health_condition, recommended_split = select_machine_region(df, condition_label)
 
-        # Prepare data
-        X_train, X_val, X_test, y_train, y_val, y_test = prepare_data(features, health_condition, recommended_split)
-        
-        # Create timestamp for saving files
-        timestamp = create_timestamp()
-
-        # Train model using manual grid search with cross-validation
-        best_params, best_score = manual_grid_search(X_train, y_train)
-
-        # Save the best hyperparameters and score to a JSON file
-        #best_params_file_path = save_hyperparameters(best_params, best_score, timestamp)
-
-        # Train the final model using the best hyperparameters
-        final_model = train_final_model(X_train, X_val, y_train, y_val, best_params)
-
-        # Save the final model
-        #final_model_file_path = save_trained_model(final_model, timestamp)
-
-        if BINARY:
-            # Evaluate auc and accuracy for binary classification using final model
-            accuracy, auc_score = evaluate_model(final_model, X_test, y_test, 
-                                              key=key, 
-                                              condition_label=condition_dict[key])
-
-            # Append the accuracy and auc score to the dataframe
-            metrics_df.loc[condition_label] = [key, accuracy, auc_score]
-            print(f"Accuracy: {accuracy:.3f}, AUC: {auc_score:.3f}")
+            # Check initial class distribution
+            if BINARY:
+                is_valid, class_dist = check_class_distribution(
+                    health_condition, 'full dataset', condition_label)
+                if not is_valid:
+                    print(f"Skipping condition {condition_label} - insufficient class distribution")
+                    continue
             
-            # Message to user with binary metrics
-            testing_complete_message((accuracy, auc_score))
-        else:
-            # Evaluate r^2 for regression using final model
-            r2 = evaluate_model(final_model, X_test, y_test, 
-                              key=key, 
-                              condition_label=condition_dict[key])
-
-            # Append the r^2 value to the dataframe
-            metrics_df.loc[condition_label] = [key, r2]
-            print(f"R²: {r2:.3f}")
+            # Prepare data
+            X_train, X_val, X_test, y_train, y_val, y_test = prepare_data(
+                features, health_condition, recommended_split)
             
-            # Message to user with regression metric
-            testing_complete_message(r2)
+            # Check class distribution in all splits
+            if BINARY:
+                skip_condition = False
+                for data, name in [(y_train, 'training'), (y_val, 'validation'), 
+                                 (y_test, 'testing')]:
+                    is_valid, class_dist = check_class_distribution(
+                        data, name, condition_label)
+                    if not is_valid:
+                        print(f"Skipping condition {condition_label} - insufficient distribution in {name}")
+                        skip_condition = True
+                        break
+                
+                if skip_condition:
+                    continue
+
+            # Train model using manual grid search
+            best_params, best_score = manual_grid_search(X_train, y_train)
+            
+            if best_params is None:
+                print(f"Skipping condition {condition_label} - grid search failed")
+                continue
+
+            # Train final model
+            final_model = train_final_model(X_train, X_val, y_train, y_val, best_params)
+
+            if BINARY:
+                accuracy, auc_score = evaluate_model(
+                    final_model, X_test, y_test, key=key, 
+                    condition_label=condition_dict[key])
+                
+                metrics_df.loc[condition_label] = [key, accuracy, auc_score]
+                
+                if np.isnan(auc_score):
+                    print(f"Accuracy: {accuracy:.3f}, AUC: Not available")
+                else:
+                    print(f"Accuracy: {accuracy:.3f}, AUC: {auc_score:.3f}")
+            else:
+                r2 = evaluate_model(final_model, X_test, y_test, 
+                                  key=key, condition_label=condition_dict[key])
+                metrics_df.loc[condition_label] = [key, r2]
+                print(f"R²: {r2:.3f}")
+
+        except Exception as e:
+            print(f"\nError processing condition {condition_label}: {str(e)}")
+            continue
 
     return metrics_df
 
@@ -78,6 +94,9 @@ def main(loop=False):
     Main execution script for XGBoost model training and evaluation.
     Supports both binary classification and regression based on BINARY flag.
     """
+    # Clear the log file at the start of the run
+    clear_log_file()
+    
     # Perform initial checks
     if not pre_run_check():
         return
@@ -100,6 +119,10 @@ def main(loop=False):
         # Run the model training and evaluation for all conditions
         metrics_df = training_loop(df, condition_df, condition_dict)
 
+        if metrics_df.empty:
+            print("\nNo valid models could be trained - check class distributions")
+            return
+
         # Save results to CSV with appropriate filename
         if BINARY:
             filename = "binary_classification_results.csv"
@@ -112,7 +135,6 @@ def main(loop=False):
 
         # Create appropriate visualization based on task type
         if BINARY:
-            # Add function to plot binary classification metrics
             plot_binary_metrics(metrics_df, condition_dict, 
                               save_path=os.path.join(RESULTS_FOLDER, plot_filename))
         else:
@@ -129,13 +151,23 @@ def main(loop=False):
         # Run model for single condition
         metrics_df = training_loop(df, condition_df, filtered_dict)
 
+        if metrics_df.empty:
+            print("\nNo valid model could be trained for the selected condition")
+            return
+
         # Print results based on task type
         if BINARY:
-            print(f"\nResults for selected condition:")
-            print(f"Accuracy: {metrics_df['accuracy'].values[0]:.3f}")
-            print(f"AUC: {metrics_df['auc'].values[0]:.3f}")
+            try:
+                print(f"\nResults for selected condition:")
+                print(f"Accuracy: {metrics_df['accuracy'].values[0]:.3f}")
+                print(f"AUC: {metrics_df['auc'].values[0]:.3f}")
+            except IndexError:
+                print("\nNo valid results available for binary classification")
         else:
-            print(f"\nR² value for selected condition: {metrics_df['r2'].values[0]:.3f}")
+            try:
+                print(f"\nR² value for selected condition: {metrics_df['r2'].values[0]:.3f}")
+            except IndexError:
+                print("\nNo valid R² value available for regression")
 
 if __name__ == "__main__":
     main(loop=True)

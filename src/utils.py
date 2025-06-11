@@ -8,7 +8,6 @@ Description: Utility functions for user interaction
 
 import matplotlib.pyplot as plt
 import numpy as np
-import seaborn as sns
 import time 
 import json
 from config import *
@@ -117,6 +116,42 @@ def save_trained_model(model, timestamp):
     print(f"\nTrained model saved to '{file_path}'.")
 
     return file_path
+
+
+def check_class_distribution(y_data, stage_name, condition_label=None, min_samples=10):
+    """
+    Check if the data has sufficient samples of each class.
+    
+    Args:
+        y_data (array-like): Labels to check
+        stage_name (str): Name of the current pipeline stage (e.g., 'training', 'validation')
+        condition_label (str, optional): Name of the condition being processed
+        min_samples (int): Minimum required samples per class
+        
+    Returns:
+        tuple: (bool, dict) - (is_valid, class_distribution)
+    """
+    unique_classes, counts = np.unique(y_data, return_counts=True)
+    class_dist = dict(zip(unique_classes, counts))
+    
+    # Check for minimum number of classes
+    if len(unique_classes) < 2:
+        print(f"\nWarning: {stage_name} set contains only class {unique_classes[0]}")
+        if condition_label:
+            log_skipped_condition(condition_label, class_dist, 
+                                f"insufficient classes in {stage_name} set")
+        return False, class_dist
+    
+    # Check for minimum samples per class
+    min_count = min(counts)
+    if min_count < min_samples:
+        print(f"\nWarning: {stage_name} set has only {min_count} samples in smallest class")
+        if condition_label:
+            log_skipped_condition(condition_label, class_dist,
+                                f"insufficient samples in {stage_name} set")
+        return False, class_dist
+    
+    return True, class_dist
 
 
 def plot_roc_curve(y_true, y_pred_proba, key=None, condition_label=None):
@@ -257,22 +292,31 @@ def plot_binary_metrics(metrics_df, condition_dict, cid=False, save_path=None):
         save_path (str, optional): Path to save the plot. If None, displays the plot
     """
     # Set style parameters
-    plt.style.use('seaborn')
+    plt.style.use('default')
     
     # Create figure with appropriate size
     fig = plt.figure(figsize=(12, 6))
     
-    # Extract data
-    conditions = metrics_df['condition'].astype(str)
+    # Extract and clean data
+    try:
+        # Convert condition IDs to integers if they're numeric
+        conditions = metrics_df['condition'].apply(lambda x: int(float(x)) if isinstance(x, (int, float, str)) else x)
+    except ValueError:
+        print("Warning: Could not convert condition IDs to integers. Using original values.")
+        conditions = metrics_df['condition']
+    
     accuracies = metrics_df['accuracy']
     aucs = metrics_df['auc']
     
     # Get x-axis positions
     x = np.arange(len(conditions))
-    width = 0.35  # Width of bars
+    width = 0.35
     
-    # Create bars
+    # Create bars with grid
     ax = plt.gca()
+    ax.grid(True, axis='y', linestyle='--', alpha=0.7)
+    
+    # Create grouped bars
     rects1 = ax.bar(x - width/2, accuracies, width, label='Accuracy', 
                     color='skyblue', edgecolor='black')
     rects2 = ax.bar(x + width/2, aucs, width, label='AUC', 
@@ -281,15 +325,19 @@ def plot_binary_metrics(metrics_df, condition_dict, cid=False, save_path=None):
     # Customize plot
     plt.ylabel('Score', fontsize=12)
     plt.title('Binary Classification Metrics by Condition', fontsize=14, pad=20)
-    plt.grid(axis='y', linestyle='--', alpha=0.7)
     
-    # Set x-axis labels
+    # Set x-axis labels with error handling
     if cid:
         plt.xlabel('Condition ID', fontsize=12)
         x_labels = conditions
     else:
         plt.xlabel('Condition', fontsize=12)
-        x_labels = [condition_dict.get(int(cond), cond) for cond in conditions]
+        try:
+            x_labels = [condition_dict.get(int(float(cond)), str(cond)) 
+                       for cond in conditions]
+        except (ValueError, TypeError):
+            print("Warning: Using condition IDs as labels due to conversion error")
+            x_labels = conditions.astype(str)
     
     plt.xticks(x, x_labels, rotation=45, ha='right')
     
@@ -297,15 +345,16 @@ def plot_binary_metrics(metrics_df, condition_dict, cid=False, save_path=None):
     def add_value_labels(rects):
         for rect in rects:
             height = rect.get_height()
-            ax.text(rect.get_x() + rect.get_width()/2., height,
-                   f'{height:.2f}',
-                   ha='center', va='bottom', fontsize=10)
+            if not np.isnan(height):  # Only add label if height is not NaN
+                ax.text(rect.get_x() + rect.get_width()/2., height,
+                       f'{height:.2f}',
+                       ha='center', va='bottom', fontsize=10)
     
     add_value_labels(rects1)
     add_value_labels(rects2)
     
-    # Add legend
-    plt.legend(loc='upper right')
+    # Add legend with a semi-transparent background
+    plt.legend(loc='upper right', framealpha=0.9)
     
     # Adjust layout to prevent label cutoff
     plt.tight_layout()
@@ -319,6 +368,39 @@ def plot_binary_metrics(metrics_df, condition_dict, cid=False, save_path=None):
         plt.show()
     
     return fig
+
+def log_skipped_condition(condition_label, class_dist, reason="single class"):
+    """
+    Log information about skipped conditions during model training.
+    
+    Args:
+        condition_label (str): Name/label of the condition being skipped
+        class_dist (dict): Distribution of classes in the dataset
+        reason (str): Reason for skipping the condition
+    """
+    timestamp = time.strftime("%Y%m%d-%H%M%S")
+    log_file = os.path.join(RESULTS_FOLDER, 'skipped_conditions.log')
+    
+    with open(log_file, 'a') as f:
+        f.write(f"\nTimestamp: {timestamp}\n")
+        f.write(f"Condition: {condition_label}\n")
+        f.write(f"Class distribution: {class_dist}\n")
+        f.write(f"Reason: {reason}\n")
+        f.write("-" * 50 + "\n")
+
+def clear_log_file():
+    """
+    Clear the skipped_conditions.log file at the start of a new run.
+    Creates the results directory if it doesn't exist.
+    """
+    # Create results directory if it doesn't exist
+    os.makedirs(RESULTS_FOLDER, exist_ok=True)
+    
+    # Clear the log file by opening it in write mode
+    log_file = os.path.join(RESULTS_FOLDER, 'skipped_conditions.log')
+    with open(log_file, 'w') as f:
+        f.write(f"New run started at: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write("-" * 50 + "\n")
 
 def create_directory(directory_path):
     """

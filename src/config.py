@@ -15,6 +15,9 @@ BINARY = True
 # Machine region selection
 MACHINE_REGION = "maestro2_3d_macula"
 
+# Minimum required samples per class for binary classification
+MIN_SAMPLES_PER_CLASS = 5
+
 # ---------------------------------------------------------------------
 # Get the root directory of the project, and go back one level        #
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))#
