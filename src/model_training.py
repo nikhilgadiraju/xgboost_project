@@ -184,6 +184,14 @@ def evaluate_model(model, X_test, y_test, key=None, condition_label=None):
         # Plot ROC curve with condition label in title
         fig = plot_roc_curve(y_test, y_pred_proba, key=key, condition_label=condition_label)
         metric = (accuracy, auc)
+
+         # Create confusion matrix only for high performing models
+        if auc > 0.75:
+            confusion_matrix_path = os.path.join(RESULTS_FOLDER, 
+                                                f'confusion_matrix_patient_{key}.png')
+            plot_confusion_matrix(y_test, y_pred, condition_label, 
+                                save_path=confusion_matrix_path)
+        
     else:
         y_pred = booster.predict(dtest)
         r2 = r2_score(y_test, y_pred)

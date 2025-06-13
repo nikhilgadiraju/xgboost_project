@@ -12,7 +12,8 @@ import time
 import json
 from config import *
 import os
-from sklearn.metrics import r2_score, roc_curve, auc
+from sklearn.metrics import r2_score, roc_curve, auc, confusion_matrix
+import seaborn as sns
 
 
 def pre_run_check():
@@ -291,6 +292,9 @@ def plot_binary_metrics(metrics_df, condition_dict, cid=False, save_path=None):
         cid (bool): If True, use condition IDs as labels instead of descriptions
         save_path (str, optional): Path to save the plot. If None, displays the plot
     """
+    # Get camera type (Only coded for either Maestro2 or Triton)
+    camera_type = get_camera_type()
+    
     # Set style parameters
     plt.style.use('default')
     
@@ -324,7 +328,7 @@ def plot_binary_metrics(metrics_df, condition_dict, cid=False, save_path=None):
     
     # Customize plot
     plt.ylabel('Score', fontsize=12)
-    plt.title('Binary Classification Metrics by Condition', fontsize=14, pad=20)
+    plt.title(f'Binary Classification Metrics by Condition\nCamera: {camera_type}', fontsize=14, pad=20)
     
     # Set x-axis labels with error handling
     if cid:
@@ -379,6 +383,53 @@ def plot_binary_metrics(metrics_df, condition_dict, cid=False, save_path=None):
         plt.show()
     
     return fig
+
+def plot_confusion_matrix(y_true, y_pred, condition_label, save_path=None):
+    """
+    Create and save a confusion matrix visualization.
+    
+    Args:
+        y_true: True labels
+        y_pred: Predicted labels
+        condition_label: Name of the condition for the plot title
+        save_path: Path to save the confusion matrix plot
+    """
+    # Get camera type
+    camera_type = get_camera_type()
+    
+    # Create confusion matrixs
+    cm = confusion_matrix(y_true, y_pred)
+    
+    # Create figure
+    plt.figure(figsize=(8, 6))
+    
+    # Plot confusion matrix
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
+                xticklabels=['Negative', 'Positive'],
+                yticklabels=['Negative', 'Positive'])
+    
+    plt.title(f'Confusion Matrix: {condition_label}\nCamera: {camera_type}', fontsize=14, pad=20)
+    plt.ylabel('True Label')
+    plt.xlabel('Predicted Label')
+    
+    # Save or display
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        print(f"Confusion matrix saved to: {save_path}")
+        plt.close()
+    else:
+        plt.show()
+
+def get_camera_type():
+    """
+    Determine the camera type based on the CSV file name.
+    """
+    # List of camera names to check in the CSV_PATH
+    camera_list = ["maestro2", "triton"]
+
+    # Check if the CSV_PATH contsains any of the camera names
+    return next((camera.capitalize() for camera in camera_list if camera in CSV_PATH.split('/')[-1].lower()), "Unknown")
+
 
 def log_skipped_condition(condition_label, class_dist, reason="single class"):
     """

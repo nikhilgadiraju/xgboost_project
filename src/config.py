@@ -10,7 +10,7 @@ for XGBoost model tuning.
 import os
 
 # Binary classification for condition.csv dataset
-BINARY = True
+BINARY = False
 
 # Minimum required samples per class for binary classification
 MIN_SAMPLES_PER_CLASS = 5
@@ -34,8 +34,7 @@ PLOTS_FOLDER = os.path.join(ROOT_DIR, "binary_plots" if BINARY else "regression_
 # ---------------------------------------------------------------------
 
 # color fundus photography (CFP) dataset                                
-CSV_PATH = r"/home/s440308/Documents/19_csv_preprocessing/cfp_features_etdrs_mean_triton_fovea.csv"
-# /home/s440308/Documents/19_csv_preprocessing/results_Maestro2_macula_renamed_good_quality_FINETUNED.csv
+CSV_PATH = r"/home/s440308/Documents/19_csv_preprocessing/results_Maestro2_macula_renamed_good_quality_FINETUNED.csv"
 
 # condition dataset (measurement or condition csv)
 CONDITION_PATH = r"/home/s440308/Documents/21_statistical_analysis/measurement.csv" if not BINARY else r"/home/s440308/Documents/21_statistical_analysis/condition_occurrence.csv"

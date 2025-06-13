@@ -76,6 +76,8 @@ def training_loop(df, condition_df, condition_dict):
                     print(f"Accuracy: {accuracy:.3f}, AUC: Not available")
                 else:
                     print(f"Accuracy: {accuracy:.3f}, AUC: {auc_score:.3f}")
+                    if auc_score > 0.75:
+                        print("High performance model - confusion matrix generated")
             else:
                 r2 = evaluate_model(final_model, X_test, y_test, 
                                   key=key, condition_label=condition_dict[key])
@@ -138,7 +140,7 @@ def main(loop=False):
             plot_binary_metrics(metrics_df, condition_dict, 
                               save_path=os.path.join(RESULTS_FOLDER, plot_filename))
         else:
-            plot_r2_bar_chart(metrics_df, condition_dict, cid=True, 
+            plot_r2_bar_chart(metrics_df, condition_dict, cid=False, 
                              save_path=os.path.join(RESULTS_FOLDER, plot_filename))
     
     else: 
