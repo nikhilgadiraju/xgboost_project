@@ -222,64 +222,94 @@ def plot_prediction_vs_actual(y_test, y_pred, key=None, condition_label=None):
 
 def plot_r2_bar_chart(r2_df, condition_dict, cid=False, save_path=None):
     """
-    Create a bar chart from the r2_df DataFrame and optionally save it to a file.
-    The bar labels are set using the condition_dict.
-
+    Creates a bar chart of R² scores across all conditions.
+    Matches the style of binary_metrics plot.
+    
     Args:
-        r2_df (pd.DataFrame): DataFrame containing 'condition' and 'r2' columns.
-        condition_dict (dict): Dictionary mapping condition keys to their descriptions.
-        save_path (str, optional): File path to save the chart. If None, the chart is only displayed.
+        r2_df (pd.DataFrame): DataFrame containing columns ['condition', 'r2']
+        condition_dict (dict): Dictionary mapping condition IDs to their descriptions
+        cid (bool): If True, use condition IDs as labels instead of descriptions
+        save_path (str, optional): Path to save the plot. If None, displays the plot
     """
-    # Extract data for the bar chart
-    conditions = r2_df['condition'].astype(int).astype(str) # First column for x-axis labels
-    r2_values = r2_df['r2']                                 # Second column for bar heights
-
-    # Map conditions to their descriptions using condition_dict
-    condition_labels = [condition_dict.get(int(cond), cond) for cond in conditions] if not cid else conditions
-
-    # Create the bar chart
-    plt.figure(figsize=(15, 12))
-    bars = plt.bar(conditions, r2_values, color='skyblue', edgecolor='black')
-
-    # Add labels and title
-    plt.xlabel('Condition', fontsize=12)
-    plt.ylabel('R² Value', fontsize=12)
-    plt.title('R² Values by Condition', fontsize=14)
-    plt.grid(axis='y', linestyle='--', alpha=0.7)
-
-    # Add labels above positive bars and below negative bars
-    for bar, label in zip(bars, condition_labels):
-        height = bar.get_height()
-        if height >= 0:
-            # Positive bar: Place label above the bar
-            y_position = height + 0.03
-            va = 'bottom'
-        else:
-            # Negative bar: Place label below the bar
-            y_position = height - 0.03
-            va = 'top'
-
-        plt.text(
-            bar.get_x() + bar.get_width() / 2,  # X-coordinate (center of the bar)
-            y_position,                         # Y-coordinate (above or below the bar)
-            label,                              # Text to display (mapped condition label)
-            ha='center',                        # Horizontal alignment
-            va=va,                              # Vertical alignment
-            fontsize=10,                        # Font size
-            color='black',                      # Text color
-            rotation=90                         # Rotate the label vertically
-        )
-
-    # Remove x-axis tick labels since they are now above/below the bars
-    plt.xticks([])
-
-    # Adjust layout to prevent label overlap
+    # Set style parameters
+    plt.style.use('default')
+    
+    # Create figure with appropriate size
+    fig, ax = plt.subplots(figsize=(12, 6))
+    
+    # Extract and clean data
+    try:
+        conditions = r2_df['condition'].apply(lambda x: int(float(x)) if isinstance(x, (int, float, str)) else x)
+    except ValueError:
+        print("Warning: Could not convert condition IDs to integers. Using original values.")
+        conditions = r2_df['condition']
+    
+    r2_scores = r2_df['r2']
+    
+    # Create bars with grid
+    x = np.arange(len(conditions))
+    width = 0.6  # Wider bars since we only have one metric
+    
+    # Add grid
+    ax.grid(True, axis='y', linestyle='--', alpha=0.7)
+    
+    # Create bars
+    rects = ax.bar(x, r2_scores, width, color='skyblue', edgecolor='black')
+    
+    # Customize plot
+    plt.ylabel('R² Score', fontsize=12)
+    
+    # Get camera type for title
+    camera_type = get_camera_type()
+    plt.title(f'Regression Performance by Condition\n{camera_type} Camera', 
+              fontsize=14, pad=20)
+    
+    # Set x-axis labels with error handling
+    if cid:
+        plt.xlabel('Condition ID', fontsize=12)
+        x_labels = conditions
+    else:
+        plt.xlabel('Condition', fontsize=12)
+        try:
+            x_labels = [condition_dict.get(int(float(cond)), str(cond)) 
+                       for cond in conditions]
+        except (ValueError, TypeError):
+            print("Warning: Using condition IDs as labels due to conversion error")
+            x_labels = conditions.astype(str)
+    
+    plt.xticks(x, x_labels, rotation=45, ha='right')
+    
+    # Add value labels above bars
+    def add_value_labels(rects):
+        for rect in rects:
+            height = rect.get_height()
+            if not np.isnan(height):
+                # Add small offset to prevent overlap
+                y_offset = 0.01
+                ax.text(rect.get_x() + rect.get_width()/2., 
+                       height + y_offset,
+                       f'{height:.2f}',
+                       ha='center', va='bottom', 
+                       fontsize=9,
+                       bbox=dict(facecolor='white', 
+                               edgecolor='none',
+                               alpha=0.7,
+                               pad=1))
+    
+    add_value_labels(rects)
+    
+    # Adjust layout
     plt.tight_layout()
-
-    # Save the chart to the provided file path if specified
+    
+    # Save or display plot
     if save_path:
-        plt.savefig(save_path, format='png', dpi=300)
-        print(f"Bar chart saved to {save_path}")
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        print(f"R² bar chart saved to: {save_path}")
+        plt.close()
+    else:
+        plt.show()
+    
+    #return fig
 
 
 def plot_binary_metrics(metrics_df, condition_dict, cid=False, save_path=None):
