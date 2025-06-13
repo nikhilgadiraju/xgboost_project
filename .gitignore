@@ -9,3 +9,11 @@ __pycache__/
 hyperparameters/
 
 support/
+
+results/
+
+plots/
+
+binary_plots/
+
+regression_plots/

@@ -9,6 +9,12 @@ for XGBoost model tuning.
 
 import os
 
+# Binary classification for condition.csv dataset
+BINARY = True
+
+# Minimum required samples per class for binary classification
+MIN_SAMPLES_PER_CLASS = 5
+
 # ---------------------------------------------------------------------
 # Get the root directory of the project, and go back one level        #
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))#
@@ -19,27 +25,29 @@ PARAMETERS_FOLDER = os.path.join(ROOT_DIR, "hyperparameters")         #
 # Models folder                                                       #
 MODELS_FOLDER = os.path.join(ROOT_DIR, "saved_models")                #
                                                                       #
+# Results folder                                                      #
+RESULTS_FOLDER = os.path.join(ROOT_DIR, "results")                    #
+                                                                      #
+# Plots folder
+PLOTS_FOLDER = os.path.join(ROOT_DIR, "binary_plots" if BINARY else "regression_plots")                        #
+                                                                      #
 # ---------------------------------------------------------------------
 
 # color fundus photography (CFP) dataset                                
-CSV_PATH = r"data/new_cfp_features_fully_labelled.csv"
+CSV_PATH = r"/home/s440308/Documents/19_csv_preprocessing/results_Triton_macula_renamed_good_quality_FINETUNED.csv"
 
-# optical coherence tomography (OCT) dataset                        
-# CSV_PATH = r"data\RetFound_LF_all_OCT_fully_labelled.csv"
+# condition dataset (measurement or condition csv)
+CONDITION_PATH = r"/home/s440308/Documents/21_statistical_analysis/measurement.csv" if not BINARY else r"/home/s440308/Documents/21_statistical_analysis/condition_occurrence.csv"
 
 # ---------------------------------------------------------------------
 CSV_PATH = os.path.join(ROOT_DIR, CSV_PATH)                           #
+CONDITION_PATH = os.path.join(ROOT_DIR, CONDITION_PATH)               #
 # ---------------------------------------------------------------------
-# Comparison setting 
-BINARY = True  # False for all 4, True for healthy vs unhealthy
-
-# Machine region selection
-MACHINE_REGION = "maestro2_3d_macula"
 
 # Hyperparameter tuning phases
 # Phase 1
-LEARNING_RATE = 0.2275  # 0.01 - 0.3
-NUM_ROUND = 100 # 100 - 1000
+LEARNING_RATE = [0.01, 0.05, 0.1, 0.15, 0.2, 0.3]  # 0.01 - 0.3
+NUM_ROUND = [100, 250, 500, 750, 1000] # 100 - 1000
 
 # Phase 2
 MAX_DEPTH = 4 # 3 - 10
