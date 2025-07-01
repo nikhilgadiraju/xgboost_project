@@ -13,7 +13,7 @@ from config import *
 import json
 import time
 
-def training_loop(df, condition_df, condition_dict):
+def training_loop(df, condition_df, condition_dict, filter_classes=None):
     # Initialize the output metrics value dataframe
     if CLASSIFICATION:
         if MULTI_CLASS:
@@ -44,14 +44,20 @@ def training_loop(df, condition_df, condition_dict):
                 # Train final model
                 final_model = train_final_model(X_train, X_val, y_train, y_val, best_params)
                 
-                # Evaluate model
+                # Evaluate model (with optional filtering)
                 accuracy, report = evaluate_model(
                     final_model, X_test, y_test, 
                     key='multi_class', condition_label='Camera Types',
-                    label_encoder=label_encoder)
+                    label_encoder=label_encoder,
+                    filter_classes=filter_classes)
                 
-                metrics_df.loc[0] = ['Camera Types', accuracy, report]
+                # Update metrics DataFrame
+                suffix = f" (Filtered: {', '.join(filter_classes)})" if filter_classes else ""
+                metrics_df.loc[0] = [f'Camera Types{suffix}', accuracy, report]
+                
                 print(f"\nAccuracy: {accuracy:.3f}")
+                if filter_classes:
+                    print(f"Evaluated classes: {', '.join(filter_classes)}")
                 print("\nClassification Report:")
                 print(report)
                 
@@ -154,7 +160,7 @@ def training_loop(df, condition_df, condition_dict):
     return metrics_df
 
 
-def main(loop=False):
+def main(loop=False, filter_classes=None):
     """
     Main execution script for XGBoost model training and evaluation.
     Supports both binary classification and regression based on BINARY flag.
@@ -191,15 +197,19 @@ def main(loop=False):
         return
 
     if loop:
-        # Run the model training and evaluation for all conditions
-        metrics_df = training_loop(df, condition_df, condition_dict)
+        # Run the model training and evaluation for all conditions 
+        # (with filtering for multiclass)
+        filtering_list = ["triton_3d_radial", "triton_macula_12x12", "triton_macula_6x6"]
+        metrics_df = training_loop(df, condition_df, condition_dict, filter_classes=filter_classes)
 
         if not metrics_df.empty:
+            # Update filenames to reflect filtering
+            suffix = "_filtered" if filter_classes else ""
             # Save results to CSV with appropriate filename
             if CLASSIFICATION:
                 if MULTI_CLASS:
-                    filename = "multi_class_classification_results.csv"
-                    plot_filename = "multi_class_metrics_chart.png"
+                    filename = f"multi_class_classification_results{suffix}.csv"
+                    plot_filename = f"multi_class_metrics_chart{suffix}.png"
                 else:
                     filename = "binary_classification_results.csv"
                     plot_filename = "binary_metrics_chart.png"
@@ -210,17 +220,21 @@ def main(loop=False):
             metrics_df.to_csv(os.path.join(RESULTS_FOLDER, filename), index=False)
 
             # Create appropriate visualization based on task type
-            # Create appropriate visualization based on task type
             if CLASSIFICATION:
                 if MULTI_CLASS:
-                    plot_multi_class_metrics(metrics_df, condition_dict, 
-                                        save_path=os.path.join(RESULTS_FOLDER, plot_filename))
+                    plot_multi_class_metrics(metrics_df, 
+                                        save_path=os.path.join(RESULTS_FOLDER, plot_filename),
+                                        classes=filter_classes)
                 else:
                     plot_binary_metrics(metrics_df, condition_dict, 
                                     save_path=os.path.join(RESULTS_FOLDER, plot_filename))
             else:
                 plot_r2_bar_chart(metrics_df, condition_dict, cid=False, 
                                 save_path=os.path.join(RESULTS_FOLDER, plot_filename))
+            
+            # Print results
+            print(f"\nResults saved to: {os.path.join(RESULTS_FOLDER, filename)}")
+            print(f"Plot saved to: {os.path.join(RESULTS_FOLDER, plot_filename)}")
     
     else:
         # Filter condition_dict for specific concept ID
@@ -255,5 +269,6 @@ def main(loop=False):
                 print("\nNo valid R² value available for regression")
 
 if __name__ == "__main__":
-    main(loop=True)
+    filter_classes = ["maestro2_3d_macula", "triton_macula_12x12"]
+    main(loop=True, filter_classes=None)
     

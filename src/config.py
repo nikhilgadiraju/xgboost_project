@@ -49,11 +49,11 @@ CONDITION_PATH = os.path.join(ROOT_DIR, CONDITION_PATH)               #
 
 # Hyperparameter tuning phases
 # Phase 1
-LEARNING_RATE = [0.01, 0.05, 0.1, 0.15, 0.2, 0.3]  # 0.01 - 0.3
+LEARNING_RATE = [0.01, 0.025, 0.05, 0.075, 0.1, 0.15, 0.2, 0.25, 0.3]  # 0.01 - 0.3
 NUM_ROUND = [100, 250, 500, 750, 1000] # 100 - 1000
 
 # Phase 2
-MAX_DEPTH = 4 # 3 - 10
+MAX_DEPTH = [3, 5, 10] # 3 - 10
 MIN_CHILD_WEIGHT = 3 # 1 - 10
 GAMMA = 0.0 # 0 - 5
 

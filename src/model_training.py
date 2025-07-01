@@ -180,11 +180,17 @@ def train_final_model(X_train, X_val, y_train, y_val, best_params):
 
     return final_model
 
-def evaluate_model(model, X_test, y_test, key, condition_label=None, label_encoder=None):
+def evaluate_model(model, X_test, y_test, key, condition_label=None, label_encoder=None, filter_classes=None):
     """
-    Evaluate model performance and create appropriate visualizations based on task type.
-    For binary classification: Creates ROC curve and returns accuracy/AUC
-    For regression: Creates prediction vs actual plot and returns R²
+    Evaluate model performance and create visualizations based on task type.
+    
+    Args:
+        model: Trained XGBoost model
+        X_test: Test features
+        y_test: True labels
+        key: Identifier for saving plots
+        condition_label: Label for plot titles
+        label_encoder: LabelEncoder for multi-class labels
     """
     # Convert test data to DMatrix format
     dtest = xgb.DMatrix(X_test, label=y_test)
@@ -201,16 +207,34 @@ def evaluate_model(model, X_test, y_test, key, condition_label=None, label_encod
                 y_pred = label_encoder.inverse_transform(y_pred)
                 y_test = label_encoder.inverse_transform(y_test)
 
+                if filter_classes:
+                    mask = np.isin(y_test, filter_classes)
+                    if not np.any(mask):
+                        raise ValueError(f"No samples found for classes: {filter_classes}")
+                    
+                    y_test = y_test[mask]
+                    y_pred = y_pred[mask]
+                    X_test = X_test[mask]
+                    y_pred_proba = y_pred_proba[mask]
+
             from sklearn.metrics import accuracy_score, classification_report
             accuracy = accuracy_score(y_test, y_pred)
-            metric = (accuracy, classification_report(y_test, y_pred))
+            report = classification_report(y_test, y_pred, 
+                                        labels=filter_classes if filter_classes else None,
+                                        zero_division=0)
+            metric = (accuracy, report)
             
             # Create confusion matrix for multi-class
+            suffix = '_filtered' if filter_classes else ''
             confusion_matrix_path = os.path.join(RESULTS_FOLDER, 
-                                               f'confusion_matrix_patient_{key}.png')
-            plot_confusion_matrix(y_test, y_pred, condition_label, 
+                                               f'confusion_matrix_patient_{key}{suffix}.png')
+            
+            title_suffix = f" (Filtered: {', '.join(filter_classes)})" if filter_classes else ""
+            plot_confusion_matrix(y_test, y_pred, 
+                                f"{condition_label}{title_suffix}",
                                 save_path=confusion_matrix_path,
-                                label_encoder=label_encoder)
+                                label_encoder=label_encoder,
+                                classes=filter_classes)
         else:
             y_pred = (y_pred_proba > 0.5).astype(int)
             

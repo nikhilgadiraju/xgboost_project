@@ -425,7 +425,7 @@ def plot_binary_metrics(metrics_df, condition_dict, cid=False, save_path=None):
         plt.show()
     
 
-def plot_multi_class_metrics(metrics_df, condition_dict, save_path=None):
+def plot_multi_class_metrics(metrics_df, save_path=None, classes=None):
     """
     Creates a bar chart comparing accuracy scores across all conditions for multi-class classification.
     
@@ -452,15 +452,14 @@ def plot_multi_class_metrics(metrics_df, condition_dict, save_path=None):
     rects = ax.bar(x, accuracies, width, color='skyblue', edgecolor='black')
     
     # Customize plot
-    plt.ylabel('Accuracy Score', fontsize=12)
-    plt.title('Multi-class Classification Accuracy by Camera Type', 
+    suffix = f" (Filtered: {', '.join(classes)})" if classes else ""
+    plt.title(f'Multi-class Classification Accuracy{suffix}', 
               fontsize=14, pad=20)
+    plt.ylabel('Accuracy Score', fontsize=12)
+    plt.xlabel('Camera Type', fontsize=12)
     
     # Set x-axis labels
-    plt.xlabel('Camera Type', fontsize=12)
-    x_labels = conditions  # For multi-class, use condition names directly
-    
-    plt.xticks(x, x_labels, rotation=45, ha='right')
+    plt.xticks(x, conditions, rotation=45, ha='right')
     
     # Add value labels above bars
     for rect in rects:
@@ -485,7 +484,7 @@ def plot_multi_class_metrics(metrics_df, condition_dict, save_path=None):
         plt.show()
     
 
-def plot_confusion_matrix(y_true, y_pred, condition_label, save_path=None, label_encoder=None):
+def plot_confusion_matrix(y_true, y_pred, condition_label, save_path=None, label_encoder=None, classes=None):
     """
     Create and save a confusion matrix visualization.
     
@@ -495,18 +494,25 @@ def plot_confusion_matrix(y_true, y_pred, condition_label, save_path=None, label
         condition_label: Name of the condition for the plot title
         save_path: Path to save the confusion matrix plot
     """
+    # Use only specified classes if provided
+    if classes is not None:
+        mask = np.isin(y_true, classes) & np.isin(y_pred, classes)
+        y_true = y_true[mask]
+        y_pred = y_pred[mask]
+
     # Get camera type
     camera_type = get_camera_type()
     
-    # Create confusion matrixs
-    cm = confusion_matrix(y_true, y_pred)
+    # Create confusion matrix
+    cm = confusion_matrix(y_true, y_pred, 
+                         labels=classes if classes is not None else None)
 
     # Determine plot size based on number of classes
     n_classes = len(np.unique(y_true))
     fig_size = max(8, n_classes * 1.5)
 
     if label_encoder and CLASSIFICATION and MULTI_CLASS:
-        labels = label_encoder.classes_
+        labels = classes if classes else label_encoder.classes_
     else:
         labels = ['Negative', 'Positive'] if n_classes == 2 else range(n_classes)
     
