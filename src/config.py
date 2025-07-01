@@ -10,7 +10,8 @@ for XGBoost model tuning.
 import os
 
 # Binary classification for condition.csv dataset
-BINARY = True
+CLASSIFICATION = True  # True for classification (multi/binary), False for regression
+MULTI_CLASS = True    # True for multi-class, False for binary classification
 
 # Minimum required samples per class for binary classification
 MIN_SAMPLES_PER_CLASS = 5
@@ -29,15 +30,17 @@ MODELS_FOLDER = os.path.join(ROOT_DIR, "saved_models")                #
 RESULTS_FOLDER = os.path.join(ROOT_DIR, "results")                    #
                                                                       #
 # Plots folder
-PLOTS_FOLDER = os.path.join(ROOT_DIR, "binary_plots" if BINARY else "regression_plots")                        #
-                                                                      #
+PLOTS_FOLDER = os.path.join(ROOT_DIR, 
+                           "multi_class_plots" if (CLASSIFICATION and MULTI_CLASS)
+                           else "binary_plots" if CLASSIFICATION 
+                           else "regression_plots")                                                                      #
 # ---------------------------------------------------------------------
 
 # color fundus photography (CFP) dataset                                
-CSV_PATH = r"/home/s440308/Documents/19_csv_preprocessing/results_Triton_macula_renamed_good_quality_FINETUNED.csv"
+CSV_PATH = r"/home/s440308/Documents/20_github/xgboost_project/data/new_cfp_features_fully_labelled.csv" if (CLASSIFICATION and MULTI_CLASS) else r"/home/s440308/Documents/19_csv_preprocessing/results_Triton_macula_renamed_good_quality_FINETUNED.csv"
 
 # condition dataset (measurement or condition csv)
-CONDITION_PATH = r"/home/s440308/Documents/21_statistical_analysis/measurement.csv" if not BINARY else r"/home/s440308/Documents/21_statistical_analysis/condition_occurrence.csv"
+CONDITION_PATH = r"/home/s440308/Documents/21_statistical_analysis/condition_occurrence.csv" if CLASSIFICATION else r"/home/s440308/Documents/21_statistical_analysis/measurement.csv"
 
 # ---------------------------------------------------------------------
 CSV_PATH = os.path.join(ROOT_DIR, CSV_PATH)                           #

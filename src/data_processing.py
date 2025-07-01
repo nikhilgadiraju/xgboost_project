@@ -30,7 +30,10 @@ def create_condition_dict(df):
     """
     Create a dictionary mapping measurement_concept_id to measurement_source_value.
     """
-    csv_binary = "condition" if BINARY else "measurement"
+    if CLASSIFICATION and MULTI_CLASS:
+        return {}
+
+    csv_binary = "condition" if CLASSIFICATION else "measurement"
     df.dropna(subset=[f'{csv_binary}_concept_id'], inplace=True)
     condition_dict = df.set_index(df[f'{csv_binary}_concept_id'].astype(int))[f'{csv_binary}_source_value'].apply(convert_condition).to_dict()
     return condition_dict
@@ -40,10 +43,15 @@ def add_condition_column(df, condition_df, condition_cid):
     """
     Add a condition column to the provided dataframe
     """
+    if CLASSIFICATION and MULTI_CLASS:
+        # For multi-class, machine_region column already exists
+        return df, "Camera Types"
+    
     condition_dict = create_condition_dict(condition_df)
     condition_label = condition_dict[int(condition_cid)]
 
-    if BINARY:
+    if CLASSIFICATION:
+        # Binary classification
         filtered_cond_df = condition_df[condition_df["condition_concept_id"] == int(condition_cid)]
         value_dict = filtered_cond_df.set_index("person_id")['condition_source_value'].to_dict()
 
@@ -53,6 +61,7 @@ def add_condition_column(df, condition_df, condition_cid):
 
         print(f"Condition selected: {condition_label}")
     else:
+        # Regression
         filtered_cond_df = condition_df[condition_df["measurement_concept_id"] == int(condition_cid)]
         value_dict = filtered_cond_df.set_index("person_id")['value_as_number'].to_dict()
 
@@ -74,7 +83,7 @@ def prepare_feature_data(df, condition_label):
     
     # Extract features and health condition
     features = df[features_columns]
-    health_condition = df["study_condition"]
+    health_condition = df['machine_region'] if (CLASSIFICATION and MULTI_CLASS) else df['study_condition']
     recommended_split = df["recommended_split"]
 
     print(f"\nFeatures shape: {features.shape}")
@@ -86,12 +95,20 @@ def prepare_data(features, health_condition, recommended_split):
     """
     Encode labels and splits data into train/test sets.
     """
-    if BINARY:
-        # Ensure binary labels are 0 or 1
-        health_condition = (health_condition > 0).astype(int)
+    if CLASSIFICATION:
+        if MULTI_CLASS:
+            # Convert categorical labels to numeric using LabelEncoder
+            le = LabelEncoder()
+            health_condition = le.fit_transform(health_condition)
+            label_encoder = le  # Store for later use
+        else:
+            # Binary classification
+            health_condition = (health_condition > 0).astype(int)
+            label_encoder = None
     else:
-        # Original regression code
+        # Regression
         health_condition = pd.to_numeric(health_condition, errors='coerce')
+        label_encoder = None
 
     # split into train, val, test according to recommended split
     train_mask = recommended_split == "train"
@@ -103,5 +120,5 @@ def prepare_data(features, health_condition, recommended_split):
     X_val, y_val = features[val_mask], health_condition[val_mask]
     X_test, y_test = features[test_mask], health_condition[test_mask]
 
-    return X_train, X_val, X_test, y_train, y_val, y_test
+    return X_train, X_val, X_test, y_train, y_val, y_test, label_encoder
 

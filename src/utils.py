@@ -155,7 +155,7 @@ def check_class_distribution(y_data, stage_name, condition_label=None, min_sampl
     return True, class_dist
 
 
-def plot_roc_curve(y_true, y_pred_proba, key=None, condition_label=None):
+def plot_roc_curve(y_true, y_pred_proba, key=None, condition_label=None, save_path=None):
     """
     Plot ROC curve for binary classification.
     
@@ -184,10 +184,17 @@ def plot_roc_curve(y_true, y_pred_proba, key=None, condition_label=None):
     plt.title(title)
     
     plt.legend(loc="lower right")
-    return fig
+
+    # Save or display plot
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        print(f"R² bar chart saved to: {save_path}")
+        plt.close()
+    else:
+        plt.show()
 
 
-def plot_prediction_vs_actual(y_test, y_pred, key=None, condition_label=None):
+def plot_prediction_vs_actual(y_test, y_pred, key=None, condition_label=None, save_path=None):
     """
     Create scatter plot of predicted vs actual values.
     
@@ -217,7 +224,14 @@ def plot_prediction_vs_actual(y_test, y_pred, key=None, condition_label=None):
     
     plt.grid(True, alpha=0.3)
     plt.legend()
-    return fig
+
+    # Save or display plot
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        print(f"R² bar chart saved to: {save_path}")
+        plt.close()
+    else:
+        plt.show()
 
 
 def plot_r2_bar_chart(r2_df, condition_dict, cid=False, save_path=None):
@@ -308,8 +322,6 @@ def plot_r2_bar_chart(r2_df, condition_dict, cid=False, save_path=None):
         plt.close()
     else:
         plt.show()
-    
-    #return fig
 
 
 def plot_binary_metrics(metrics_df, condition_dict, cid=False, save_path=None):
@@ -412,9 +424,68 @@ def plot_binary_metrics(metrics_df, condition_dict, cid=False, save_path=None):
     else:
         plt.show()
     
-    return fig
 
-def plot_confusion_matrix(y_true, y_pred, condition_label, save_path=None):
+def plot_multi_class_metrics(metrics_df, condition_dict, save_path=None):
+    """
+    Creates a bar chart comparing accuracy scores across all conditions for multi-class classification.
+    
+    Args:
+        metrics_df (pd.DataFrame): DataFrame containing columns ['condition', 'accuracy', 'report']
+        condition_dict (dict): Dictionary mapping condition IDs to their descriptions
+        save_path (str, optional): Path to save the plot. If None, displays the plot
+    """
+    plt.style.use('default')
+    fig, ax = plt.subplots(figsize=(12, 6))
+    
+    # Extract data
+    conditions = metrics_df['condition']
+    accuracies = metrics_df['accuracy']
+    
+    # Create bars with grid
+    x = np.arange(len(conditions))
+    width = 0.6
+    
+    # Add grid
+    ax.grid(True, axis='y', linestyle='--', alpha=0.7)
+    
+    # Create bars
+    rects = ax.bar(x, accuracies, width, color='skyblue', edgecolor='black')
+    
+    # Customize plot
+    plt.ylabel('Accuracy Score', fontsize=12)
+    plt.title('Multi-class Classification Accuracy by Camera Type', 
+              fontsize=14, pad=20)
+    
+    # Set x-axis labels
+    plt.xlabel('Camera Type', fontsize=12)
+    x_labels = conditions  # For multi-class, use condition names directly
+    
+    plt.xticks(x, x_labels, rotation=45, ha='right')
+    
+    # Add value labels above bars
+    for rect in rects:
+        height = rect.get_height()
+        if not np.isnan(height):
+            ax.text(rect.get_x() + rect.get_width()/2., height + 0.01,
+                   f'{height:.2f}',
+                   ha='center', va='bottom',
+                   fontsize=9,
+                   bbox=dict(facecolor='white', 
+                           edgecolor='none',
+                           alpha=0.7,
+                           pad=1))
+    
+    plt.tight_layout()
+    
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        print(f"Multi-class metrics chart saved to: {save_path}")
+        plt.close()
+    else:
+        plt.show()
+    
+
+def plot_confusion_matrix(y_true, y_pred, condition_label, save_path=None, label_encoder=None):
     """
     Create and save a confusion matrix visualization.
     
@@ -429,16 +500,26 @@ def plot_confusion_matrix(y_true, y_pred, condition_label, save_path=None):
     
     # Create confusion matrixs
     cm = confusion_matrix(y_true, y_pred)
+
+    # Determine plot size based on number of classes
+    n_classes = len(np.unique(y_true))
+    fig_size = max(8, n_classes * 1.5)
+
+    if label_encoder and CLASSIFICATION and MULTI_CLASS:
+        labels = label_encoder.classes_
+    else:
+        labels = ['Negative', 'Positive'] if n_classes == 2 else range(n_classes)
     
     # Create figure
-    plt.figure(figsize=(8, 6))
+    plt.figure(figsize=(fig_size, fig_size))
     
     # Plot confusion matrix
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
-                xticklabels=['Negative', 'Positive'],
-                yticklabels=['Negative', 'Positive'])
+                xticklabels=labels,
+                yticklabels=labels)
     
-    plt.title(f'Confusion Matrix: {condition_label}\nCamera: {camera_type}', fontsize=14, pad=20)
+    plt.title(f'Confusion Matrix: {condition_label}\nCamera: {camera_type}',
+              fontsize=14, pad=20)
     plt.ylabel('True Label')
     plt.xlabel('Predicted Label')
     
@@ -449,6 +530,7 @@ def plot_confusion_matrix(y_true, y_pred, condition_label, save_path=None):
         plt.close()
     else:
         plt.show()
+
 
 def get_camera_type():
     """
