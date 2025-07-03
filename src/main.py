@@ -13,17 +13,18 @@ from config import *
 import json
 import time
 
-def training_loop(df, condition_df, condition_dict, filter_classes=None):
+def training_loop(df, condition_df, condition_dict, train_filter_classes=None, eval_filter_classes=None):
     # Initialize the output metrics value dataframe
     if CLASSIFICATION:
         if MULTI_CLASS:
             metrics_df = pd.DataFrame(columns=['condition', 'accuracy', 'report'])
             # For multi-class, process single task
             try:
-                # Direct feature extraction (no condition column needed)
-                features, health_condition, recommended_split = prepare_feature_data(df, 'Camera Types')
+                # Filter classes at data preparation stage
+                features, health_condition, recommended_split = prepare_feature_data(
+                    df, 'Camera Types', filter_classes=train_filter_classes)
                 
-                # Prepare data
+                # Rest of processing uses filtered data
                 X_train, X_val, X_test, y_train, y_val, y_test, label_encoder = prepare_data(
                     features, health_condition, recommended_split)
                 
@@ -44,20 +45,25 @@ def training_loop(df, condition_df, condition_dict, filter_classes=None):
                 # Train final model
                 final_model = train_final_model(X_train, X_val, y_train, y_val, best_params)
                 
-                # Evaluate model (with optional filtering)
+                # Evaluate model with optional additional filtering
                 accuracy, report = evaluate_model(
                     final_model, X_test, y_test, 
-                    key='multi_class', condition_label='Camera Types',
+                    key='multi_class', 
+                    condition_label='Camera Types',
                     label_encoder=label_encoder,
-                    filter_classes=filter_classes)
+                    filter_classes=eval_filter_classes  # Additional filtering at evaluation
+                )
                 
                 # Update metrics DataFrame
-                suffix = f" (Filtered: {', '.join(filter_classes)})" if filter_classes else ""
-                metrics_df.loc[0] = [f'Camera Types{suffix}', accuracy, report]
+                train_suffix = f" (Trained on: {', '.join(train_filter_classes)})" if train_filter_classes else ""
+                eval_suffix = f" (Evaluated on: {', '.join(eval_filter_classes)})" if eval_filter_classes else ""
+                metrics_df.loc[0] = [f'Camera Types{train_suffix}{eval_suffix}', accuracy, report]
                 
                 print(f"\nAccuracy: {accuracy:.3f}")
-                if filter_classes:
-                    print(f"Evaluated classes: {', '.join(filter_classes)}")
+                if train_filter_classes:
+                    print(f"Trained on classes: {', '.join(train_filter_classes)}")
+                if eval_filter_classes:
+                    print(f"Evaluated on classes: {', '.join(eval_filter_classes)}")
                 print("\nClassification Report:")
                 print(report)
                 
@@ -160,7 +166,7 @@ def training_loop(df, condition_df, condition_dict, filter_classes=None):
     return metrics_df
 
 
-def main(loop=False, filter_classes=None):
+def main(loop=False, train_filter_classes=None, eval_filter_classes=None):
     """
     Main execution script for XGBoost model training and evaluation.
     Supports both binary classification and regression based on BINARY flag.
@@ -200,11 +206,16 @@ def main(loop=False, filter_classes=None):
         # Run the model training and evaluation for all conditions 
         # (with filtering for multiclass)
         filtering_list = ["triton_3d_radial", "triton_macula_12x12", "triton_macula_6x6"]
-        metrics_df = training_loop(df, condition_df, condition_dict, filter_classes=filter_classes)
+        metrics_df = training_loop(df, condition_df, condition_dict, 
+                                 train_filter_classes=train_filter_classes,
+                                 eval_filter_classes=eval_filter_classes)
 
         if not metrics_df.empty:
             # Update filenames to reflect filtering
-            suffix = "_filtered" if filter_classes else ""
+            train_suffix = "_train_filtered" if train_filter_classes else ""
+            eval_suffix = "_eval_filtered" if eval_filter_classes else ""
+            suffix = f"{train_suffix}{eval_suffix}"
+
             # Save results to CSV with appropriate filename
             if CLASSIFICATION:
                 if MULTI_CLASS:
@@ -222,9 +233,10 @@ def main(loop=False, filter_classes=None):
             # Create appropriate visualization based on task type
             if CLASSIFICATION:
                 if MULTI_CLASS:
-                    plot_multi_class_metrics(metrics_df, 
-                                        save_path=os.path.join(RESULTS_FOLDER, plot_filename),
-                                        classes=filter_classes)
+                    plot_multi_class_metrics(
+                        metrics_df, 
+                        save_path=os.path.join(RESULTS_FOLDER, plot_filename),
+                        classes=eval_filter_classes if eval_filter_classes else train_filter_classes)
                 else:
                     plot_binary_metrics(metrics_df, condition_dict, 
                                     save_path=os.path.join(RESULTS_FOLDER, plot_filename))
@@ -238,10 +250,10 @@ def main(loop=False, filter_classes=None):
     
     else:
         # Filter condition_dict for specific concept ID
-        filtered_dict = {key: value for key, value in condition_dict.items() 
-                        if key == 4182210}
         # measurement: 3004410 (HgbA1C%)
         # condition: 4317977 (Cataracts)
+        filtered_dict = {key: value for key, value in condition_dict.items() 
+                        if key == 4182210}
 
         # Run model for single condition
         metrics_df = training_loop(df, condition_df, filtered_dict)
@@ -269,6 +281,37 @@ def main(loop=False, filter_classes=None):
                 print("\nNo valid R² value available for regression")
 
 if __name__ == "__main__":
-    filter_classes = ["maestro2_3d_macula", "triton_macula_12x12"]
-    main(loop=True, filter_classes=None)
+    # Example 1: Filter both training and evaluation
+    # Removed classes: "triton_macula_12x12", "eidon_mosaic"
+    
+    # Example 1: All classes present
+    train_classes_1 = [
+        "uwf_central",
+        "uwf_nasal",
+        "uwf_temporal",
+        "macula",
+        "wide",
+        "mac_or_disk",
+        "radial",
+        "macula_6x6"
+    ]
+
+    # Example 2: macula-centered classes
+    train_classes_2 = [
+        "uwf_central",
+        "macula",
+        "mac_or_disk",
+        "macula_6x6"
+    ]
+
+    # Example 3: 
+    train_classes_3 = [
+        "macula",
+        "macula_6x6"
+    ]
+
+    eval_classes = None
+    main(loop=True, 
+         train_filter_classes=train_classes_1,
+         eval_filter_classes=eval_classes)
     

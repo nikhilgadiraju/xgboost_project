@@ -74,20 +74,40 @@ def add_condition_column(df, condition_df, condition_cid):
     return df, condition_label
 
 
-def prepare_feature_data(df, condition_label):
+def prepare_feature_data(df, condition_label, filter_classes=None):
     """
     Select the machine region from the dataset.
     """
-    # Get all feature columns
+    # Get feature columns
     features_columns = df.columns[df.columns.str.startswith('feature_')]
-    
-    # Extract features and health condition
     features = df[features_columns]
-    health_condition = df['machine_region'] if (CLASSIFICATION and MULTI_CLASS) else df['study_condition']
-    recommended_split = df["recommended_split"]
+    
+    if CLASSIFICATION and MULTI_CLASS:
+        health_condition = df['protocol']
+        
+        # Filter data if specific classes are requested
+        if filter_classes:
+            mask = np.isin(health_condition, filter_classes)
+            if not np.any(mask):
+                raise ValueError(f"No samples found for classes: {filter_classes}")
+            
+            features = features[mask]
+            health_condition = health_condition[mask]
+            recommended_split = df['recommended_split'][mask]
+            
+            print(f"\nFiltered data to include only: {', '.join(filter_classes)}")
+            print(f"Samples per class:")
+            for cls in filter_classes:
+                count = sum(health_condition == cls)
+                print(f"  {cls}: {count}")
+        else:
+            recommended_split = df['recommended_split']
+    else:
+        health_condition = df['study_condition']
+        recommended_split = df['recommended_split']
 
     print(f"\nFeatures shape: {features.shape}")
-    print(f"Health conditions shape: {health_condition.shape}")
+    print(f"Target variable shape: {health_condition.shape}")
 
     return features, health_condition, recommended_split
 

@@ -37,7 +37,7 @@ PLOTS_FOLDER = os.path.join(ROOT_DIR,
 # ---------------------------------------------------------------------
 
 # color fundus photography (CFP) dataset                                
-CSV_PATH = r"/home/s440308/Documents/20_github/xgboost_project/data/new_cfp_features_fully_labelled.csv" if (CLASSIFICATION and MULTI_CLASS) else r"/home/s440308/Documents/19_csv_preprocessing/results_Triton_macula_renamed_good_quality_FINETUNED.csv"
+CSV_PATH = r"/home/s440308/Documents/20_github/xgboost_project/data/results_pre-trained_20250703.csv" if (CLASSIFICATION and MULTI_CLASS) else r"/home/s440308/Documents/19_csv_preprocessing/results_Triton_macula_renamed_good_quality_FINETUNED.csv"
 
 # condition dataset (measurement or condition csv)
 CONDITION_PATH = r"/home/s440308/Documents/21_statistical_analysis/condition_occurrence.csv" if CLASSIFICATION else r"/home/s440308/Documents/21_statistical_analysis/measurement.csv"
@@ -53,7 +53,7 @@ LEARNING_RATE = [0.01, 0.025, 0.05, 0.075, 0.1, 0.15, 0.2, 0.25, 0.3]  # 0.01 - 
 NUM_ROUND = [100, 250, 500, 750, 1000] # 100 - 1000
 
 # Phase 2
-MAX_DEPTH = [3, 5, 10] # 3 - 10
+MAX_DEPTH = 3 # 3 - 10
 MIN_CHILD_WEIGHT = 3 # 1 - 10
 GAMMA = 0.0 # 0 - 5
 
