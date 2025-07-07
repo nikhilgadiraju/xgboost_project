@@ -37,7 +37,7 @@ PLOTS_FOLDER = os.path.join(ROOT_DIR,
 # ---------------------------------------------------------------------
 
 # color fundus photography (CFP) dataset                                
-CSV_PATH = r"/home/s440308/Documents/20_github/xgboost_project/data/results_pre-trained_20250703.csv" if (CLASSIFICATION and MULTI_CLASS) else r"/home/s440308/Documents/19_csv_preprocessing/results_Triton_macula_renamed_good_quality_FINETUNED.csv"
+CSV_PATH = r"/home/s440308/Documents/20_github/xgboost_project/data/results_fine-tuned_20250703.csv" if (CLASSIFICATION and MULTI_CLASS) else r"/home/s440308/Documents/19_csv_preprocessing/results_Triton_macula_renamed_good_quality_FINETUNED.csv"
 
 # condition dataset (measurement or condition csv)
 CONDITION_PATH = r"/home/s440308/Documents/21_statistical_analysis/condition_occurrence.csv" if CLASSIFICATION else r"/home/s440308/Documents/21_statistical_analysis/measurement.csv"

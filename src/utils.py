@@ -15,6 +15,17 @@ import os
 from sklearn.metrics import r2_score, roc_curve, auc, confusion_matrix
 import seaborn as sns
 
+# Add this dictionary at the top of utils.py
+CAMERA_LABELS = {
+    "mac_or_disk": "Optomed\n(Macula/Disk)",
+    "macula": "Maestro2\n(Macula)",
+    "wide": "Maestro2\n(Wide)",
+    "uwf_central": "Eidon\n(Central)",
+    "uwf_nasal": "Eidon\n(Nasal)",
+    "uwf_temporal": "Eidon\n(Temporal)",
+    "radial": "Triton\n(Radial)",
+    "macula_6x6": "Triton\n(Macula 6x6)"
+}
 
 def pre_run_check():
     """
@@ -499,9 +510,6 @@ def plot_confusion_matrix(y_true, y_pred, condition_label, save_path=None, label
         mask = np.isin(y_true, classes) & np.isin(y_pred, classes)
         y_true = y_true[mask]
         y_pred = y_pred[mask]
-
-    # Get camera type
-    camera_type = get_camera_type()
     
     # Create confusion matrix
     cm = confusion_matrix(y_true, y_pred, 
@@ -510,28 +518,75 @@ def plot_confusion_matrix(y_true, y_pred, condition_label, save_path=None, label
     # Determine plot size based on number of classes
     n_classes = len(np.unique(y_true))
     fig_size = max(8, n_classes * 1.5)
-
+    
+    # Set labels based on classification type
     if label_encoder and CLASSIFICATION and MULTI_CLASS:
         labels = classes if classes else label_encoder.classes_
+        display_labels = [CAMERA_LABELS.get(label, label) for label in labels]
     else:
-        labels = ['Negative', 'Positive'] if n_classes == 2 else range(n_classes)
+        display_labels = ['Negative', 'Positive'] if n_classes == 2 else range(n_classes)
     
     # Create figure
-    plt.figure(figsize=(fig_size, fig_size))
+    plt.figure(figsize=(fig_size, fig_size), dpi=150)
+    
+    # Create subplot with specific spacing
+    ax = plt.subplot(111)
     
     # Plot confusion matrix
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
-                xticklabels=labels,
-                yticklabels=labels)
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', annot_kws={"fontsize":14},
+                xticklabels=display_labels,
+                yticklabels=display_labels,
+                ax=ax, square=True,
+                cbar_kws={"shrink": 0.8})
+        
+    # Set title based on classification type
+    if CLASSIFICATION and MULTI_CLASS:
+        title = f'Confusion Matrix: {condition_label}'
+    else:
+        camera_type = get_camera_type()
+        title = f'Confusion Matrix: {condition_label}\nCamera: {camera_type}'
     
-    plt.title(f'Confusion Matrix: {condition_label}\nCamera: {camera_type}',
-              fontsize=14, pad=20)
-    plt.ylabel('True Label')
-    plt.xlabel('Predicted Label')
+    plt.title(title, fontsize=14, pad=20)
+    plt.ylabel('True Label', fontsize=12, labelpad=2, fontweight='bold')
+    plt.xlabel('Predicted Label', fontsize=12, labelpad=10, fontweight='bold')
     
-    # Save or display
+    # Set x-labels horizontal and below plot
+    ax.set_xticklabels(ax.get_xticklabels(),
+                       rotation=0,          # Horizontal labels
+                       ha='center',         # Center align horizontally
+                       va='top',           # Align to top of space
+                       fontsize=12,        # Set font size for x-labels
+                       position=(0, -0.02))  # Move labels below plot
+    
+    # Set y-labels right-aligned and away from plot
+    ax.set_yticklabels(ax.get_yticklabels(),
+                       rotation=0,
+                       ha='right',         # Right align text
+                       va='center',        # Center vertically
+                       fontsize=12,       # Set font size for y-labels
+                       position=(-0.01, 0))  # Move labels away from plot
+        
+    # Center text within multi-line labels
+    for label in ax.get_xticklabels() + ax.get_yticklabels():
+        if '\n' in label.get_text():
+            label.set_linespacing(1.5)
+            label.set_multialignment('center')
+
+    # Replace tight_layout() with specific margin adjustments
+    plt.subplots_adjust(
+        left=0.1,    # Reduce left margin
+        right=0.9,   # Reduce right margin
+        bottom=0.1,  # Reduce bottom margin
+        top=0.9      # Reduce top margin
+    )
+    
+    # When saving, reduce padding
     if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        plt.savefig(save_path, 
+                    dpi=300, 
+                    bbox_inches='tight',
+                    pad_inches=0.1)  # Reduce padding around saved figure
         print(f"Confusion matrix saved to: {save_path}")
         plt.close()
     else:

@@ -15,6 +15,7 @@ from sklearn.metrics import r2_score
 from sklearn.model_selection import StratifiedKFold
 from config import *
 from utils import *
+import time
 
 def to_list(param):
     """
@@ -224,10 +225,13 @@ def evaluate_model(model, X_test, y_test, key, condition_label=None, label_encod
                                         zero_division=0)
             metric = (accuracy, report)
             
+            # Get timestamp for filename
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+
             # Create confusion matrix for multi-class
             suffix = '_filtered' if filter_classes else ''
-            confusion_matrix_path = os.path.join(RESULTS_FOLDER, 
-                                               f'confusion_matrix_patient_{key}{suffix}.png')
+            confusion_matrix_path = os.path.join(PLOTS_FOLDER, 
+                                               f'confusion_matrix_patient_{timestamp}{suffix}.png')
             
             title_suffix = f" (Filtered: {', '.join(filter_classes)})" if filter_classes else ""
             plot_confusion_matrix(y_test, y_pred, 

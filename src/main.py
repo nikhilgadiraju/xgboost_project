@@ -199,8 +199,8 @@ def main(loop=False, train_filter_classes=None, eval_filter_classes=None):
     create_directory(RESULTS_FOLDER)
     create_directory(PLOTS_FOLDER)
 
-    if not start_or_quit():
-        return
+    #if not start_or_quit():
+        #return
 
     if loop:
         # Run the model training and evaluation for all conditions 
@@ -288,12 +288,11 @@ if __name__ == "__main__":
     train_classes_1 = [
         "uwf_central",
         "uwf_nasal",
-        "uwf_temporal",
         "macula",
         "wide",
         "mac_or_disk",
         "radial",
-        "macula_6x6"
+        "macula_6x6",
     ]
 
     # Example 2: macula-centered classes
@@ -304,7 +303,7 @@ if __name__ == "__main__":
         "macula_6x6"
     ]
 
-    # Example 3: 
+    # Example 3: maestro2 vs triton (topcon brand)
     train_classes_3 = [
         "macula",
         "macula_6x6"
@@ -312,6 +311,6 @@ if __name__ == "__main__":
 
     eval_classes = None
     main(loop=True, 
-         train_filter_classes=train_classes_1,
+         train_filter_classes=train_classes_2,
          eval_filter_classes=eval_classes)
     
