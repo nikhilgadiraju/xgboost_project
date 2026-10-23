@@ -310,7 +310,9 @@ if __name__ == "__main__":
     ]
 
     eval_classes = None
-    main(loop=True, 
-         train_filter_classes=train_classes_2,
-         eval_filter_classes=eval_classes)
-    
+
+    for classes in [train_classes_3]:
+        main(loop=True, 
+            train_filter_classes=classes,
+            eval_filter_classes=eval_classes)
+        

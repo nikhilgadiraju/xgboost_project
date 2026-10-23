@@ -231,7 +231,7 @@ def evaluate_model(model, X_test, y_test, key, condition_label=None, label_encod
             # Create confusion matrix for multi-class
             suffix = '_filtered' if filter_classes else ''
             confusion_matrix_path = os.path.join(PLOTS_FOLDER, 
-                                               f'confusion_matrix_patient_{timestamp}{suffix}.png')
+                                               f'confusion_matrix_patient_pre-trained_{timestamp}{suffix}.png')
             
             title_suffix = f" (Filtered: {', '.join(filter_classes)})" if filter_classes else ""
             plot_confusion_matrix(y_test, y_pred, 
