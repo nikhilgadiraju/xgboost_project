@@ -48,6 +48,7 @@ pip install xgboost
 ├── data/                    # Dataset directory
 ├── hyperparameters/         # Stores best hyperparameters found during tuning
 ├── saved_models/            # Stores trained XGBoost models
+├── saved_runs/              # One run folder with metadata, logs, and predictions per execution
 ├── README.md                # Project documentation (this file)
 ```
 
@@ -146,6 +147,24 @@ pip install xgboost
     ```
     The best hyperparameters and trained model are saved in the `hyperparameters` and `saved_models` directories, respectively. The file names include the timestamp of the training session.
 
+### Run records for reporting
+
+Every execution of `python src/main.py` creates a timestamped folder under `saved_runs/`.
+Each folder contains:
+
+- `run.json`: hyperparameter search ranges, selected values, cross-validation settings,
+  split sizes and uses, early stopping, seeds, weighting/resampling settings, results,
+  and paths to saved predictions.
+- `terminal.log`: the output printed during that execution.
+- `predictions/`: CSV files containing the true labels, predictions, and probabilities
+  for each evaluation.
+
+The current pipeline uses the dataset's predefined `recommended_split` values. The
+training split is used for grid-search cross-validation and fitting, the validation
+split is used for early stopping, and the test split is used only for final evaluation.
+Cross-validation is row-level `xgb.cv` with three folds; participants are not explicitly
+grouped together, and no class weighting or resampling is applied.
+
 ### **4. Repeat [Step 2](#2-customize-hyperparameters) and [Step 3](#3-run-the-training-pipeline) for Further Hyperparameter Tuning**
 
 ### **5. Load the Best Model for Testing**
@@ -160,4 +179,3 @@ pip install xgboost
 ## Author
 **Roy Huang**  
 📧 ruoqiuhuang@gmail.com
-

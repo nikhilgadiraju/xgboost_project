@@ -229,6 +229,11 @@ def main(loop=False, train_filter_classes=None, eval_filter_classes=None):
                 plot_filename = "r2_bar_chart.png"
             
             metrics_df.to_csv(os.path.join(RESULTS_FOLDER, filename), index=False)
+            record_run_data("results", {
+                "metrics_file": os.path.join(RESULTS_FOLDER, filename),
+                "plot_file": os.path.join(RESULTS_FOLDER, plot_filename),
+                "metrics": metrics_df.to_dict(orient="records"),
+            })
 
             # Create appropriate visualization based on task type
             if CLASSIFICATION:
@@ -312,7 +317,8 @@ if __name__ == "__main__":
     eval_classes = None
 
     for classes in [train_classes_3]:
-        main(loop=True, 
+        run_with_logging(
+            main,
+            loop=True,
             train_filter_classes=classes,
             eval_filter_classes=eval_classes)
-        

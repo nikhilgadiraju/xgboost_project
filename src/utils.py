@@ -8,12 +8,19 @@ Description: Utility functions for user interaction
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import time 
 import json
+import sys
+import io
 from config import *
 import os
 from sklearn.metrics import r2_score, roc_curve, auc, confusion_matrix
 import seaborn as sns
+from contextlib import redirect_stdout
+
+
+ACTIVE_RUN = None
 
 # Add this dictionary at the top of utils.py
 CAMERA_LABELS = {
@@ -37,6 +44,9 @@ def pre_run_check():
 
     if not os.path.exists(MODELS_FOLDER):
         os.makedirs(MODELS_FOLDER)
+
+    if not os.path.exists(SAVED_RUNS_FOLDER):
+        os.makedirs(SAVED_RUNS_FOLDER)
 
     if not os.path.exists(CSV_PATH):
         print(f"Data path '{CSV_PATH}' does not exist.")
@@ -85,6 +95,134 @@ def create_timestamp():
     Create a timestamp for saving files.
     """
     return time.strftime("%Y%m%d-%H%M%S")
+
+
+def _json_safe(value):
+    """Convert common scientific Python values into JSON-serializable values."""
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, (np.integer, np.floating)):
+        return value.item()
+    if isinstance(value, float) and np.isnan(value):
+        return None
+    return value
+
+
+class _Tee:
+    def __init__(self, *streams):
+        self.streams = streams
+
+    def write(self, text):
+        for stream in self.streams:
+            stream.write(text)
+            stream.flush()
+        return len(text)
+
+    def flush(self):
+        for stream in self.streams:
+            stream.flush()
+
+
+def start_run():
+    """Create a run directory and initialize metadata collection."""
+    global ACTIVE_RUN
+    run_id = f"{create_timestamp()}-{int(time.time() * 1000) % 1000:03d}"
+    run_dir = os.path.join(SAVED_RUNS_FOLDER, run_id)
+    os.makedirs(run_dir, exist_ok=False)
+    ACTIVE_RUN = {
+        "run_id": run_id,
+        "started_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "run_directory": run_dir,
+        "terminal_output": "",
+        "hyperparameter_searches": [],
+        "predictions": [],
+        "results": [],
+    }
+    return ACTIVE_RUN
+
+
+def record_run_data(section, value):
+    """Append or update data collected during the active run."""
+    if ACTIVE_RUN is None:
+        return
+    if section not in ACTIVE_RUN:
+        ACTIVE_RUN[section] = []
+    if isinstance(ACTIVE_RUN[section], list):
+        ACTIVE_RUN[section].append(_json_safe(value))
+    else:
+        ACTIVE_RUN[section] = _json_safe(value)
+
+
+def save_run_predictions(condition_label, y_true, y_pred, probabilities=None):
+    """Save predictions for one evaluation and register the artifact."""
+    if ACTIVE_RUN is None:
+        return None
+    prediction_dir = os.path.join(ACTIVE_RUN["run_directory"], "predictions")
+    os.makedirs(prediction_dir, exist_ok=True)
+    filename = f"predictions_{len(ACTIVE_RUN['predictions']) + 1:03d}.csv"
+    path = os.path.join(prediction_dir, filename)
+    prediction_data = {
+        "condition": [condition_label] * len(y_true),
+        "y_true": _json_safe(y_true),
+        "y_pred": _json_safe(y_pred),
+    }
+    if probabilities is not None:
+        probabilities = np.asarray(probabilities)
+        if probabilities.ndim == 1:
+            prediction_data["predicted_probability"] = _json_safe(probabilities)
+        else:
+            for index in range(probabilities.shape[1]):
+                prediction_data[f"predicted_probability_class_{index}"] = _json_safe(
+                    probabilities[:, index])
+    pd.DataFrame(prediction_data).to_csv(path, index=False)
+    ACTIVE_RUN["predictions"].append({
+        "condition": condition_label,
+        "path": path,
+        "rows": len(y_true),
+    })
+    return path
+
+
+def finish_run(status="completed", error=None):
+    """Write the run manifest and close the active run."""
+    global ACTIVE_RUN
+    if ACTIVE_RUN is None:
+        return None
+    ACTIVE_RUN["finished_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    ACTIVE_RUN["status"] = status
+    if error:
+        ACTIVE_RUN["error"] = str(error)
+    manifest_path = os.path.join(ACTIVE_RUN["run_directory"], "run.json")
+    with open(manifest_path, "w") as file:
+        json.dump(_json_safe(ACTIVE_RUN), file, indent=2)
+    run_directory = ACTIVE_RUN["run_directory"]
+    ACTIVE_RUN = None
+    return run_directory
+
+
+def run_with_logging(function, *args, **kwargs):
+    """Run a callable while mirroring terminal output into the run manifest."""
+    run = start_run()
+    original_stdout = sys.stdout
+    status = "completed"
+    error = None
+    output_buffer = io.StringIO()
+    try:
+        with open(os.path.join(run["run_directory"], "terminal.log"), "w") as log_file:
+            with redirect_stdout(_Tee(original_stdout, log_file, output_buffer)):
+                result = function(*args, **kwargs)
+        return result
+    except Exception as exception:
+        status = "failed"
+        error = exception
+        raise
+    finally:
+        run["terminal_output"] = output_buffer.getvalue()
+        finish_run(status, error)
 
 
 def copy_and_update_params(params, updates):

@@ -70,7 +70,7 @@ def cross_validation_model(X_train, y_train, params, cv_folds=3):
                       else 'rmse',
         'num_class': len(np.unique(y_train)) if (CLASSIFICATION and MULTI_CLASS) else None,
         'tree_method': 'hist',        # Use histogram-based algorithm
-        'device': 'cuda'              # Enable GPU acceleration
+        'device': 'cuda',             # Enable GPU acceleration
     }
     params = copy_and_update_params(params, updates)
 
@@ -89,7 +89,6 @@ def cross_validation_model(X_train, y_train, params, cv_folds=3):
         metrics='merror' if (CLASSIFICATION and MULTI_CLASS)
                else 'auc' if CLASSIFICATION
                else 'rmse',
-        seed=42
     )
 
     # Extract and return the appropriate metric
@@ -110,6 +109,23 @@ def manual_grid_search(X_train, y_train, cv_folds=3):
     """
     # Generate all possible hyperparameter combinations
     hyperparameter_combinations = generate_hyperparameter_combinations()
+    record_run_data("hyperparameter_searches", {
+        "search_method": "manual exhaustive grid search",
+        "search_space": {
+            key: list(dict.fromkeys(params[key] for params in hyperparameter_combinations))
+            for key in hyperparameter_combinations[0]
+        } if hyperparameter_combinations else {},
+        "combinations_tested": len(hyperparameter_combinations),
+        "cross_validation": {
+            "method": "XGBoost xgb.cv",
+            "folds": cv_folds,
+            "stratified": bool(CLASSIFICATION),
+            "participants_kept_together": False,
+        },
+        "early_stopping_rounds": 10,
+        "class_weighting": "none",
+        "resampling": "none",
+    })
     best_score = float('inf')
     best_params = None
 
@@ -132,6 +148,11 @@ def manual_grid_search(X_train, y_train, cv_folds=3):
     print("Best parameters found:", best_params)
     print(f"Best cross-validation {'Error Rate' if (CLASSIFICATION and MULTI_CLASS) else 'AUC' if CLASSIFICATION else 'RMSE'}: {abs(best_score):.4f}")
     print("-------------------------------------")
+    record_run_data("selected_hyperparameters", {
+        "parameters": best_params,
+        "cross_validation_score": best_score,
+        "reported_score": abs(best_score),
+    })
 
     return best_params, best_score
 
@@ -153,7 +174,7 @@ def train_final_model(X_train, X_val, y_train, y_val, best_params):
         'num_class': len(np.unique(y_train)) if (CLASSIFICATION and MULTI_CLASS) else None,
         'tree_method': 'hist',
         'early_stopping_rounds': 10,
-        'device': 'cuda'
+        'device': 'cuda',
     }
     best_params = copy_and_update_params(best_params, updates)
 
@@ -170,6 +191,12 @@ def train_final_model(X_train, X_val, y_train, y_val, best_params):
 
     # Retrain with best iteration if available
     best_iteration = final_model.get_booster().best_iteration
+    record_run_data("early_stopping", {
+        "enabled": True,
+        "rounds": 10,
+        "validation_set": "validation split",
+        "best_iteration": best_iteration,
+    })
     if best_iteration is not None:
         print(f"\nRetraining with best iteration: {best_iteration}")
         final_model.set_params(n_estimators=best_iteration + 1)
@@ -223,6 +250,7 @@ def evaluate_model(model, X_test, y_test, key, condition_label=None, label_encod
             report = classification_report(y_test, y_pred, 
                                         labels=filter_classes if filter_classes else None,
                                         zero_division=0)
+            save_run_predictions(condition_label, y_test, y_pred, y_pred_proba)
             metric = (accuracy, report)
             
             # Get timestamp for filename
@@ -245,6 +273,7 @@ def evaluate_model(model, X_test, y_test, key, condition_label=None, label_encod
             from sklearn.metrics import roc_auc_score, accuracy_score
             auc = roc_auc_score(y_test, y_pred_proba)
             accuracy = accuracy_score(y_test, y_pred)
+            save_run_predictions(condition_label, y_test, y_pred, y_pred_proba)
             
             # Plot ROC curve with condition label in title
             roc_path = os.path.join(PLOTS_FOLDER, f'roc_curve_patient_{key}.png')
@@ -260,6 +289,7 @@ def evaluate_model(model, X_test, y_test, key, condition_label=None, label_encod
     else:
         y_pred = booster.predict(dtest)
         r2 = r2_score(y_test, y_pred)
+        save_run_predictions(condition_label, y_test, y_pred)
         
         # Plot regression predictions with condition label in title
         plot_path = os.path.join(PLOTS_FOLDER, f'predictions_patient_{key}.png')

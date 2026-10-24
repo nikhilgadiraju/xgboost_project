@@ -12,6 +12,7 @@ import time
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 from config import *
+from utils import record_run_data
 
 def load_dataset(csv_string):
     """
@@ -140,5 +141,15 @@ def prepare_data(features, health_condition, recommended_split):
     X_val, y_val = features[val_mask], health_condition[val_mask]
     X_test, y_test = features[test_mask], health_condition[test_mask]
 
-    return X_train, X_val, X_test, y_train, y_val, y_test, label_encoder
+    record_run_data("data_splits", {
+        "method": "predefined recommended_split column",
+        "train_rows": int(train_mask.sum()),
+        "validation_rows": int(val_mask.sum()),
+        "test_rows": int(test_mask.sum()),
+        "train_used_for": "hyperparameter cross-validation and final model fitting",
+        "validation_used_for": "early stopping during final model fitting",
+        "test_used_for": "final held-out evaluation only",
+        "participant_grouping": "not applied; split follows recommended_split labels",
+    })
 
+    return X_train, X_val, X_test, y_train, y_val, y_test, label_encoder

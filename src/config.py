@@ -29,6 +29,9 @@ MODELS_FOLDER = os.path.join(ROOT_DIR, "saved_models")                #
 # Results folder                                                      #
 RESULTS_FOLDER = os.path.join(ROOT_DIR, "results")                    #
                                                                       #
+# Per-run metadata, logs, metrics, and predictions                    #
+SAVED_RUNS_FOLDER = os.path.join(ROOT_DIR, "saved_runs")              #
+                                                                      #
 # Plots folder
 PLOTS_FOLDER = os.path.join(ROOT_DIR, 
                            "multi_class_plots" if (CLASSIFICATION and MULTI_CLASS)
