@@ -15,6 +15,7 @@ Key requirements enforced here:
 import os
 import sys
 import time
+import argparse
 from contextlib import redirect_stdout
 from typing import Iterable, Optional
 
@@ -23,6 +24,7 @@ import pandas as pd
 import xgboost as xgb
 import model_training as mt
 from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, precision_score, recall_score, roc_auc_score
+from sklearn.model_selection import StratifiedGroupKFold
 
 from model_training import manual_grid_search, train_final_model
 
@@ -33,7 +35,18 @@ from config import (
     CONDITION_PATH,
     CSV_PATH,
     DIABETES_CONCEPT_ID,
+    LEARNING_RATE,
+    NUM_ROUND,
+    MAX_DEPTH,
+    MIN_CHILD_WEIGHT,
+    GAMMA,
+    REG_LAMBDA,
+    REG_ALPHA,
+    SUBSAMPLE,
+    COLSAMPLE_BYTREE,
+    COLSAMPLE_BYLEVEL,
     PAIRED_BOOTSTRAP_REPLICATES,
+    PAIRED_MIN_VALIDATION_AUC,
     PAIRED_RANDOM_SEED,
     PAIRED_RESULTS_FOLDER,
     PAIRING_RULE,
@@ -76,7 +89,6 @@ def _rename_latest_saved_run() -> str:
 
 def run_paired_analyses_cli() -> pd.DataFrame:
     """Run the paired-analysis workflow and mirror the output to the terminal and saved run logs."""
-    # Run paired analysis with logging to capture terminal output in saved_runs.
     result = run_with_logging(_run_paired_analysis_pipeline)
     _rename_latest_saved_run()
     print("\nSaved paired analysis run with paired_analyses prefix in saved_runs.")
@@ -94,12 +106,10 @@ def _run_paired_analysis_pipeline() -> pd.DataFrame:
     print(f"CFP dataset shape: {df.shape}")
     print(f"Condition dataset shape: {condition_df.shape}")
 
-    # Run Step 1: paired-eye summary using same-eye cross-camera pairing.
     print("\nStep 1: build and summarize same-eye camera pairs.")
     paired_summary = run_paired_analysis(df, condition_df)
     print(paired_summary)
 
-    # Run Step 2: paired-camera classification on pretrained and fine-tuned latent vectors.
     print("\nStep 2: train Maestro2 vs Triton paired-eye camera classifier.")
     paired_camera_summary = run_step_2_classifier()
     print(paired_camera_summary.to_string(index=False))
@@ -147,31 +157,25 @@ def _print_device_protocol_crosstab(df: pd.DataFrame) -> pd.DataFrame:
 
 def build_paired_eyes(df: pd.DataFrame, save_path: Optional[str] = None) -> pd.DataFrame:
     """Build one row per qualifying same-eye camera pair for Maestro2 vs Triton."""
-    # Validate required columns before building the paired-eye dataset.
     _validate_required_columns(df, ["id", "eye", "device", "protocol", "recommended_split", "filename"])
 
-    # Filter to the QC-passed image table and normalize eye labels.
     qc_df = df.copy()
     qc_df["participant_id"] = pd.to_numeric(qc_df["id"], errors="coerce")
     qc_df["laterality"] = _coerce_eye_key(qc_df["eye"])
     qc_df["image_id"] = qc_df.apply(_image_id_column, axis=1)
     qc_df = qc_df[qc_df["participant_id"].notna() & qc_df["laterality"].notna()].copy()
 
-    # Run device × protocol check before filtering to the target protocols.
     _print_device_protocol_crosstab(qc_df)
 
-    # Keep only the target protocols and camera devices for same-eye pairs.
     kept = qc_df[qc_df["protocol"].isin(list(TARGET_PROTOCOLS.keys()))].copy()
     kept = kept[
         ((kept["protocol"] == "macula") & (kept["device"].isin(["M"])))
         | ((kept["protocol"] == "macula_6x6") & (kept["device"].isin(["T"])))
     ].copy()
 
-    # If multiple images exist per camera for one eye, keep the first image by filename.
     kept = kept.sort_values(["participant_id", "laterality", "protocol", "image_id"], kind="mergesort")
     kept = kept.drop_duplicates(subset=["participant_id", "laterality", "protocol"], keep="first")
 
-    # Pivot to one row per participant/eye/split with both Maestro2 and Triton present.
     pivot = kept.pivot_table(
         index=["participant_id", "laterality", "recommended_split"],
         columns="protocol",
@@ -184,7 +188,6 @@ def build_paired_eyes(df: pd.DataFrame, save_path: Optional[str] = None) -> pd.D
     paired["selected_camera_pair_rule"] = "first"
     paired["participant_id"] = paired["participant_id"].astype(int)
 
-    # Save the paired-eye CSV and return the same-eye paired dataset.
     if save_path is None:
         save_path = os.path.join(_ensure_results_dir(), "paired_eyes.csv")
     else:
@@ -196,7 +199,6 @@ def build_paired_eyes(df: pd.DataFrame, save_path: Optional[str] = None) -> pd.D
 
 def summarize_paired_eyes(df: pd.DataFrame, save_path: Optional[str] = None) -> pd.DataFrame:
     """Summarize paired-eye counts at the image, eye, and participant level."""
-    # Filter to the two target protocols and camera mapping.
     qc_df = df.copy()
     _validate_required_columns(qc_df, ["id", "eye", "device", "protocol", "recommended_split", "filename"])
     qc_df["participant_id"] = pd.to_numeric(qc_df["id"], errors="coerce")
@@ -208,12 +210,10 @@ def summarize_paired_eyes(df: pd.DataFrame, save_path: Optional[str] = None) -> 
         | ((qc_df["protocol"] == "macula_6x6") & (qc_df["device"].isin(["T"])))
     ].copy()
 
-    # Build the same-eye paired dataset for counts and saved output.
     paired_df = build_paired_eyes(df, save_path=os.path.join(PAIRED_RESULTS_FOLDER, "paired_eyes.csv"))
     paired_df = paired_df.copy()
     paired_df["participant_id"] = paired_df["participant_id"].astype(int)
 
-    # Summarize overall pipeline counts.
     summary_rows = []
     summary_rows.append({"unit": "images", "analysis": "qc_pass_images_total", "value": int(len(df))})
     summary_rows.append({"unit": "images", "analysis": "qc_pass_images_after_camera_filter", "value": int(len(qc_df))})
@@ -221,7 +221,6 @@ def summarize_paired_eyes(df: pd.DataFrame, save_path: Optional[str] = None) -> 
     summary_rows.append({"unit": "eyes", "analysis": "paired_eyes_total", "value": int(paired_df.shape[0])})
     summary_rows.append({"unit": "participants", "analysis": "participants_with_paired_eyes", "value": int(paired_df["participant_id"].nunique())})
 
-    # Summarize train, validation, and test split counts.
     for split in ["train", "val", "test"]:
         split_paired = paired_df[paired_df["recommended_split"] == split]
         summary_rows.append({"unit": "eyes", "analysis": f"paired_eyes_{split}", "value": int(split_paired.shape[0])})
@@ -235,7 +234,6 @@ def summarize_paired_eyes(df: pd.DataFrame, save_path: Optional[str] = None) -> 
         summary_rows.append({"unit": "eyes", "analysis": f"eyes_dropped_only_macula_{split}", "value": int(only_macula.shape[0])})
         summary_rows.append({"unit": "eyes", "analysis": f"eyes_dropped_only_triton_{split}", "value": int(only_triton.shape[0])})
 
-    # Record the pairing settings used for reproducibility.
     summary_rows.append({"unit": "setting", "analysis": "paired_random_seed", "value": int(PAIRED_RANDOM_SEED)})
     summary_rows.append({"unit": "setting", "analysis": "paired_bootstrap_replicates", "value": int(PAIRED_BOOTSTRAP_REPLICATES)})
     summary_rows.append({"unit": "setting", "analysis": "pairing_rule", "value": PAIRING_RULE})
@@ -252,7 +250,6 @@ def summarize_paired_eyes(df: pd.DataFrame, save_path: Optional[str] = None) -> 
 
 def report_missing_condition_occurrence(paired_df: pd.DataFrame, condition_df: pd.DataFrame) -> pd.DataFrame:
     """Report participants with no condition_occurrence records and return the binary OMOP concept-201826 map."""
-    # Exclude participants with zero condition_occurrence records before assigning the binary diabetes label.
     if condition_df is None:
         raise ValueError("condition_df is required to compute the binary OMOP concept 201826 label.")
 
@@ -281,12 +278,10 @@ def report_missing_condition_occurrence(paired_df: pd.DataFrame, condition_df: p
 
 def _build_paired_camera_dataset(latent_df: pd.DataFrame, paired_df: pd.DataFrame) -> pd.DataFrame:
     """Stack the paired-eye Maestro2 and Triton latent vectors into one classification dataset."""
-    # Validate feature columns and build one row per paired-eye camera image.
     _validate_required_columns(latent_df, ["filename", "recommended_split"])
     feature_cols = [column for column in latent_df.columns if column.startswith("feature_")]
     records = []
 
-    # For each paired eye, attach the corresponding Maestro2 and Triton latent vectors.
     for _, row in paired_df.iterrows():
         participant_id = int(row["participant_id"])
         laterality = str(row["laterality"])
@@ -314,7 +309,6 @@ def _build_paired_camera_dataset(latent_df: pd.DataFrame, paired_df: pd.DataFram
                 record[feature_name] = float(feature_values[idx])
             records.append(record)
 
-    # Fail early if no paired rows were matched to the latent vector feature files.
     if not records:
         raise ValueError("No paired-eye camera rows were matched to the latent-vector dataset.")
     return pd.DataFrame(records)
@@ -322,7 +316,6 @@ def _build_paired_camera_dataset(latent_df: pd.DataFrame, paired_df: pd.DataFram
 
 def _bootstrap_participant_metrics(y_true: np.ndarray, y_prob: np.ndarray, participant_ids: np.ndarray, n_boot: int = 2000, seed: int = 0):
     """Compute participant-level nonparametric bootstrap 95% confidence intervals."""
-    # Resample participants rather than images to respect the paired-eye design.
     unique_participants = np.unique(participant_ids)
     rng = np.random.default_rng(seed)
     acc_samples = []
@@ -359,18 +352,15 @@ def run_paired_camera_classification(
     bootstrap_replicates: int = PAIRED_BOOTSTRAP_REPLICATES,
 ) -> pd.DataFrame:
     """Train and evaluate the paired-eye Maestro2-vs-Triton camera classifier for one latent-vector source."""
-    # Load the paired eyes and the latent vector file for the current model source.
     if paired_df is None:
         paired_df = pd.read_csv(os.path.join(PAIRED_RESULTS_FOLDER, "paired_eyes.csv"))
     latent_df = pd.read_csv(latent_csv_path)
 
-    # Build the stacked paired-eye dataset with one row per image pair.
     paired_camera_df = _build_paired_camera_dataset(latent_df, paired_df)
     feature_cols = [column for column in paired_camera_df.columns if column.startswith("feature_")]
     if not feature_cols:
         raise ValueError(f"No feature columns found in the latent-vector CSV: {latent_csv_path}")
 
-    # Split the paired-eye dataset according to the recommended_split labels.
     train_df = paired_camera_df[paired_camera_df["recommended_split"] == "train"].copy()
     val_df = paired_camera_df[paired_camera_df["recommended_split"] == "val"].copy()
     test_df = paired_camera_df[paired_camera_df["recommended_split"] == "test"].copy()
@@ -382,12 +372,9 @@ def run_paired_camera_classification(
     y_val = val_df["camera_label"].astype(int)
     y_test = test_df["camera_label"].astype(int)
 
-    # Validate that all splits contain both camera classes before fitting.
     if len(np.unique(y_train)) < 2 or len(np.unique(y_val)) < 2 or len(np.unique(y_test)) < 2:
         raise ValueError(f"Camera labels are not present in all splits for {latent_csv_path}.")
 
-    # Train model for the paired-eye camera classification task using the project's canonical
-    # grid-search and final-model training logic from model_training.py.
     original_classification = mt.CLASSIFICATION
     original_multi_class = mt.MULTI_CLASS
     try:
@@ -406,7 +393,6 @@ def run_paired_camera_classification(
     y_prob = model.predict_proba(X_test)[:, 1]
     y_pred = (y_prob >= 0.5).astype(int)
 
-    # Compute accuracy, precision, recall, F1, and AUC for the held-out test set.
     metrics = {
         "model": os.path.basename(latent_csv_path),
         "run_type": "grid_search_tuned",
@@ -421,7 +407,6 @@ def run_paired_camera_classification(
         "auc": float(roc_auc_score(y_test, y_prob)),
     }
 
-    # Compute 95% bootstrap confidence intervals at the participant level.
     boot = _bootstrap_participant_metrics(y_test.to_numpy(), y_prob, test_df["participant_id"].to_numpy(), n_boot=bootstrap_replicates, seed=PAIRED_RANDOM_SEED)
     metrics.update({
         "accuracy_ci_95_low": boot["accuracy_ci_low"],
@@ -431,7 +416,6 @@ def run_paired_camera_classification(
         "bootstrap_replicates": bootstrap_replicates,
     })
 
-    # Save confusion matrix and metrics to the paired results folder.
     cm = confusion_matrix(y_test, y_pred, labels=[0, 1])
     cm_df = pd.DataFrame(cm, index=["actual_Maestro2", "actual_Triton"], columns=["pred_Maestro2", "pred_Triton"])
 
@@ -444,7 +428,6 @@ def run_paired_camera_classification(
     metrics_df.to_csv(metrics_path, index=False)
     cm_df.to_csv(confusion_path)
 
-    # Print training metrics and confusion matrix so the terminal shows the same output as main.py.
     print(f"\nPaired-camera classification metrics for {os.path.basename(latent_csv_path)} [{subtag}]")
     print("=" * 60)
     print(metrics_df.to_string(index=False))
@@ -454,7 +437,6 @@ def run_paired_camera_classification(
     print(f"Saved metrics to: {metrics_path}")
     print(f"Saved confusion matrix to: {confusion_path}")
 
-    # Print misclassified filenames + participant IDs for the requested Step 2 audit.
     misclassified = []
     for image_filename, participant_id, true_label, pred_label, prob in zip(
         test_df["image_filename"].tolist(),
@@ -482,14 +464,11 @@ def run_paired_camera_classification(
 
 def run_step_2_classifier() -> pd.DataFrame:
     """Run the paired-eye Maestro2 vs Triton classifier on the pretrained and fine-tuned latent vectors."""
-    # Load the same-eye paired dataset and condition_occurrence labels for the binary diabetes exclusion check.
     paired_df = pd.read_csv(os.path.join(PAIRED_RESULTS_FOLDER, "paired_eyes.csv"))
     condition_df = pd.read_csv(CONDITION_PATH)
     report = report_missing_condition_occurrence(paired_df, condition_df)
     print(report.head().to_string(index=False))
 
-    # Primary analysis: run with the original fixed Topcon hyperparameters.
-    # Secondary analysis: run with the project-wide config-driven grid search for comparison.
     results = []
     for latent_csv in [
         "/home/s440308/Documents/20_github/xgboost_project/data/results_pre-trained_20250703.csv",
@@ -501,17 +480,14 @@ def run_step_2_classifier() -> pd.DataFrame:
     summary_path = os.path.join(PAIRED_RESULTS_FOLDER, "paired_camera_summary.csv")
     combined.to_csv(summary_path, index=False)
     print(f"\nSaved combined step-2 summary to: {summary_path}")
-
     return combined
 
 
 def run_paired_analysis(df: pd.DataFrame, condition_df: Optional[pd.DataFrame] = None) -> dict:
     """Run the corrected same-eye pairing summary and print the binary OMOP 201826 diabetes handling."""
-    # Build the same-eye pairing dataset and summarize the counts before any model training.
     paired_df = build_paired_eyes(df)
     summary_df = summarize_paired_eyes(df)
 
-    # Report missing/no-condition participants and the binary concept-201826 diabetes label.
     if condition_df is not None:
         label_df = report_missing_condition_occurrence(paired_df, condition_df)
         print("\nBinary diabetes label map for concept 201826")
@@ -523,7 +499,6 @@ def run_paired_analysis(df: pd.DataFrame, condition_df: Optional[pd.DataFrame] =
             print(f"count_positive_201826 = {int((label_df['diabetes_201826'] == 1).sum())}")
             print(f"count_negative_201826 = {int((label_df['diabetes_201826'] == 0).sum())}")
 
-    # Print the final matched pair counts for the manuscript summary.
     counts = {
         "paired_eyes_total": int(summary_df[summary_df["analysis"] == "paired_eyes_total"]["value"].iloc[0]),
         "participants_with_paired_eyes": int(summary_df[summary_df["analysis"] == "participants_with_paired_eyes"]["value"].iloc[0]),
@@ -550,6 +525,326 @@ def run_paired_analysis(df: pd.DataFrame, condition_df: Optional[pd.DataFrame] =
     return counts
 
 
+# ---------------------------------------------------------------------
+# Downstream condition-analysis helpers (Stage 1 only)
+# ---------------------------------------------------------------------
+
+DEFAULT_DOWNSTREAM_CONCEPT_ID = 4317977
+DEFAULT_DOWNSTREAM_LABEL = "cataracts"
+
+DOWNSTREAM_CONDITION_MAP = {
+    "cataract": {
+        "concept_id": 4317977,
+        "concept_name": "Cataracts (in one or both eyes)",
+        "aliases": {"cataract", "cataracts"},
+    },
+    "t2dm": {
+        "concept_id": 201826,
+        "concept_name": "Type II Diabetes",
+        "aliases": {"t2dm", "type2diabetes", "diabetes", "type_ii_diabetes"},
+    },
+}
+
+
+def _normalize_condition_label(label: str) -> str:
+    """Normalize a downstream condition label to the canonical option names used here."""
+    normalized = str(label or "").strip().lower().replace(" ", "_")
+    for key, metadata in DOWNSTREAM_CONDITION_MAP.items():
+        if normalized in metadata["aliases"] or normalized == key:
+            return key
+    raise ValueError(f"Unsupported downstream label '{label}'. Supported labels: {sorted(DOWNSTREAM_CONDITION_MAP)}")
+
+
+def _config_param_grid():
+    """Construct the config-driven XGBoost hyperparameter grid used for downstream tuning."""
+    values = []
+    for learning_rate in (LEARNING_RATE if isinstance(LEARNING_RATE, list) else [LEARNING_RATE]):
+        for num_round in (NUM_ROUND if isinstance(NUM_ROUND, list) else [NUM_ROUND]):
+            for max_depth in (MAX_DEPTH if isinstance(MAX_DEPTH, list) else [MAX_DEPTH]):
+                values.append(
+                    {
+                        "learning_rate": float(learning_rate),
+                        "n_estimators": int(num_round),
+                        "max_depth": int(max_depth),
+                        "min_child_weight": MIN_CHILD_WEIGHT,
+                        "gamma": GAMMA,
+                        "reg_lambda": REG_LAMBDA,
+                        "reg_alpha": REG_ALPHA,
+                        "subsample": SUBSAMPLE,
+                        "colsample_bytree": COLSAMPLE_BYTREE,
+                        "colsample_bylevel": COLSAMPLE_BYLEVEL,
+                        "objective": "binary:logistic",
+                        "tree_method": "hist",
+                        "device": "cuda",
+                        "eval_metric": "logloss",
+                    }
+                )
+    return values
+
+
+def _downstream_experiment_mask(frame: pd.DataFrame, experiment: str) -> pd.Series:
+    """Return the boolean index for a downstream experiment subset."""
+    if experiment == "A_both":
+        return np.ones(len(frame), dtype=bool)
+    if experiment == "B_maestro2_only":
+        return frame["camera_name"].eq("Maestro2")
+    if experiment == "C_triton_only":
+        return frame["camera_name"].eq("Triton")
+    raise ValueError(f"Unknown experiment '{experiment}'.")
+
+
+def _build_downstream_label_frame(
+    paired_df: pd.DataFrame,
+    condition_df: pd.DataFrame,
+    concept_id: int,
+    condition_name: str,
+) -> pd.DataFrame:
+    """Build the participant-level binary label map for a downstream condition concept."""
+    if condition_df is None:
+        raise ValueError("condition_df is required to compute the downstream condition label.")
+
+    paired_participants = set(pd.to_numeric(paired_df["participant_id"], errors="coerce").dropna().astype(int).unique())
+    condition_lookup = condition_df[["person_id", "condition_concept_id"]].copy()
+    condition_lookup["person_id"] = pd.to_numeric(condition_lookup["person_id"], errors="coerce")
+    condition_lookup["condition_concept_id"] = pd.to_numeric(condition_lookup["condition_concept_id"], errors="coerce")
+    condition_lookup = condition_lookup[condition_lookup["person_id"].notna()].copy()
+    condition_persons = set(condition_lookup["person_id"].astype(int).unique())
+    eligible_people = sorted(paired_participants & condition_persons)
+    missing = sorted(paired_participants - condition_persons)
+
+    print(f"\nPaired-eye participants with zero condition_occurrence records for {condition_name}: {len(missing)}")
+    if missing:
+        print("First 20 missing participant IDs:", missing[:20])
+
+    label_map = (
+        condition_lookup.groupby("person_id")["condition_concept_id"]
+        .apply(lambda values: int((values == concept_id).any()))
+        .astype(int)
+        .to_dict()
+    )
+
+    records = [
+        {
+            "person_id": int(person_id),
+            "condition_concept_id": int(concept_id),
+            "condition_name": str(condition_name),
+            f"{condition_name}_label": int(label_map.get(person_id, 0)),
+        }
+        for person_id in eligible_people
+    ]
+    return pd.DataFrame(records)
+
+
+def _run_downstream_stage_1(
+    condition_concept_id: int = 4317977,
+    condition_label: str = "cataract",
+    stage: int = 1,
+) -> pd.DataFrame:
+    """Run the paired-eye downstream stage-1 condition prediction workflow without evaluating the test set."""
+    if stage != 1:
+        raise ValueError("This file only implements downstream condition Stage 1. Use --stage 1.")
+
+    effective_label = _normalize_condition_label(condition_label)
+    effective_concept_id = int(condition_concept_id)
+    condition_name = DOWNSTREAM_CONDITION_MAP[effective_label]["concept_name"]
+    if effective_concept_id != DOWNSTREAM_CONDITION_MAP[effective_label]["concept_id"]:
+        effective_concept_id = DOWNSTREAM_CONDITION_MAP[effective_label]["concept_id"]
+
+    print("-------------------------------------")
+    print(f"Stage 1 downstream condition analysis: {effective_label} (concept {effective_concept_id})")
+    print(f"Verified concept name: {condition_name}")
+    print("-------------------------------------")
+
+    paired_df = pd.read_csv(os.path.join(PAIRED_RESULTS_FOLDER, "paired_eyes.csv"))
+    condition_df = pd.read_csv(CONDITION_PATH)
+    condition_df = condition_df.copy()
+    condition_df["person_id"] = pd.to_numeric(condition_df["person_id"], errors="coerce")
+    condition_df["condition_concept_id"] = pd.to_numeric(condition_df["condition_concept_id"], errors="coerce")
+    condition_df = condition_df[condition_df["person_id"].notna()].copy()
+    condition_df["person_id"] = condition_df["person_id"].astype(int)
+
+    label_df = _build_downstream_label_frame(
+        paired_df,
+        condition_df,
+        concept_id=effective_concept_id,
+        condition_name=effective_label,
+    )
+    if label_df.empty:
+        raise ValueError(f"No eligible paired-eye participants were found for concept {effective_concept_id}.")
+
+    paired_kept = paired_df.merge(
+        label_df[["person_id", f"{effective_label}_label"]].rename(columns={"person_id": "participant_id"}),
+        on="participant_id",
+        how="inner",
+    )
+
+    print("\n=== Stage 1: label counts per split after excluding participants without condition records ===")
+    for split_name in ["train", "val", "test"]:
+        split_df = paired_kept[paired_kept["recommended_split"] == split_name].copy()
+        positive = int(split_df[f"{effective_label}_label"].sum())
+        negative = int((split_df[f"{effective_label}_label"] == 0).sum())
+        print(
+            f"split={split_name} paired_eyes={len(split_df)} participants={split_df['participant_id'].nunique()} "
+            f"positive={positive} negative={negative}"
+        )
+
+    latent_paths = {
+        "pretrained": "/home/s440308/Documents/20_github/xgboost_project/data/results_pre-trained_20250703.csv",
+        "fine_tuned": "/home/s440308/Documents/20_github/xgboost_project/data/results_fine-tuned_20250703.csv",
+    }
+    param_grid = _config_param_grid()
+    print(f"\nHyperparameter combinations: {len(param_grid)}")
+
+    all_results = []
+    for vector_name, latent_path in latent_paths.items():
+        latent_df = pd.read_csv(latent_path)
+        camera_df = _build_paired_camera_dataset(latent_df, paired_kept[["participant_id", "laterality", "recommended_split", "macula", "macula_6x6"]])
+        camera_df = camera_df.merge(
+            label_df[["person_id", f"{effective_label}_label"]].rename(columns={"person_id": "participant_id"}),
+            on="participant_id",
+            how="inner",
+        )
+        camera_df["target_label"] = camera_df[f"{effective_label}_label"].astype(int)
+
+        feature_cols = [column for column in camera_df.columns if column.startswith("feature_")]
+        print(f"\n=== Vector set: {vector_name} ===")
+
+        for experiment_name in ["A_both", "B_maestro2_only", "C_triton_only"]:
+            exp_mask = _downstream_experiment_mask(camera_df, experiment_name)
+            subset = camera_df[exp_mask].copy()
+            train_df = subset[subset["recommended_split"] == "train"].copy()
+            val_df = subset[subset["recommended_split"] == "val"].copy()
+
+            if train_df.empty or val_df.empty:
+                print(f"{experiment_name}: skipped (empty train/val split)")
+                continue
+
+            X_train = train_df[feature_cols].astype(float)
+            X_val = val_df[feature_cols].astype(float)
+            y_train = train_df["target_label"].astype(int).to_numpy()
+            y_val = val_df["target_label"].astype(int).to_numpy()
+            g_train = train_df["participant_id"].astype(int).to_numpy()
+
+            if len(np.unique(y_train)) < 2 or len(np.unique(y_val)) < 2:
+                print(f"{experiment_name}: skipped (insufficient labels in train/val)")
+                continue
+
+            best_auc = -1.0
+            best_params = None
+            cv = StratifiedGroupKFold(n_splits=3, shuffle=True, random_state=PAIRED_RANDOM_SEED)
+
+            for params in param_grid:
+                fold_aucs = []
+                valid = True
+                for tr_idx, te_idx in cv.split(X_train, y_train, groups=g_train):
+                    X_tr = X_train.iloc[tr_idx]
+                    X_te = X_train.iloc[te_idx]
+                    y_tr = y_train[tr_idx]
+                    y_te = y_train[te_idx]
+
+                    if len(np.unique(y_tr)) < 2 or len(np.unique(y_te)) < 2:
+                        valid = False
+                        break
+
+                    model = xgb.XGBClassifier(
+                        **params,
+                        early_stopping_rounds=10,
+                        random_state=PAIRED_RANDOM_SEED,
+                        n_jobs=1,
+                    )
+                    model.fit(X_tr, y_tr, eval_set=[(X_te, y_te)], verbose=False)
+                    prob = model.predict_proba(X_te)[:, 1]
+                    fold_aucs.append(roc_auc_score(y_te, prob))
+
+                if not valid or not fold_aucs:
+                    continue
+                mean_auc = float(np.mean(fold_aucs))
+                if mean_auc > best_auc:
+                    best_auc = mean_auc
+                    best_params = params.copy()
+
+            if best_params is None:
+                print(f"{experiment_name}: tuning failed (no valid parameter set)")
+                continue
+
+            final_model = xgb.XGBClassifier(
+                **best_params,
+                early_stopping_rounds=10,
+                random_state=PAIRED_RANDOM_SEED,
+                n_jobs=1,
+            )
+            final_model.fit(X_train, y_train, eval_set=[(X_val, y_val)], verbose=False)
+            best_iter = final_model.get_booster().best_iteration
+            if best_iter is not None:
+                final_model.set_params(n_estimators=best_iter + 1)
+                final_model.fit(X_train, y_train, eval_set=[(X_val, y_val)], verbose=False)
+
+            val_prob = final_model.predict_proba(X_val)[:, 1]
+            val_auc = float(roc_auc_score(y_val, val_prob))
+            print(
+                f"{experiment_name}: val_auc={val_auc:.4f} cv_best_auc={best_auc:.4f} best_iter={best_iter} "
+                f"params={{learning_rate:{best_params['learning_rate']}, n_estimators:{best_params['n_estimators']}, max_depth:{best_params['max_depth']}}}"
+            )
+
+            all_results.append(
+                {
+                    "vector_set": vector_name,
+                    "condition_name": effective_label,
+                    "condition_concept_id": int(effective_concept_id),
+                    "experiment": experiment_name,
+                    "n_train": int(len(train_df)),
+                    "n_val": int(len(val_df)),
+                    "val_auc": val_auc,
+                    "cv_best_auc": best_auc,
+                    "best_params": best_params,
+                    "concept_name": condition_name,
+                }
+            )
+
+    summary = pd.DataFrame(all_results)
+    save_path = os.path.join(PAIRED_RESULTS_FOLDER, f"downstream_stage1_{effective_label}_{effective_concept_id}.csv")
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    summary.to_csv(save_path, index=False)
+    print(f"\nSaved downstream Stage 1 summary to: {save_path}")
+    print("\nStage 1 complete. No test-set metrics were computed.")
+    return summary
+
+
+def run_downstream_condition_stage_1(
+    condition_concept_id: int = 4317977,
+    condition_label: str = "cataract",
+    stage: int = 1,
+) -> pd.DataFrame:
+    """CLI-friendly wrapper for the downstream Stage 1 condition analysis."""
+    result = run_with_logging(_run_downstream_stage_1, condition_concept_id, condition_label, stage)
+    print("\nSaved downstream Stage 1 analysis with paired_analyses prefix in saved_runs.")
+    return result
+
+
+def _handle_cli() -> None:
+    """Parse CLI args for paired analyses and downstream condition prediction."""
+    parser = argparse.ArgumentParser(description="Paired-eye analysis workflows")
+    parser.add_argument("--analysis", choices=["pairing", "camera", "downstream"], default="pairing")
+    parser.add_argument("--label", default="cataract", help="Downstream condition label: cataract or t2dm")
+    parser.add_argument("--stage", type=int, default=1, help="Downstream stage to run; only stage 1 is implemented in this file")
+    args = parser.parse_args()
+
+    if args.analysis == "downstream":
+        run_downstream_condition_stage_1(
+            condition_concept_id=DOWNSTREAM_CONDITION_MAP[_normalize_condition_label(args.label)]["concept_id"],
+            condition_label=_normalize_condition_label(args.label),
+            stage=args.stage,
+        )
+        return
+
+    if args.analysis == "pairing":
+        run_paired_analyses_cli()
+        return
+
+    if args.analysis == "camera":
+        run_step_2_classifier()
+        return
+
+
 if __name__ == "__main__":
-    # Run the paired-analysis pipeline directly from the terminal with the same verbose output style as main.py.
-    run_paired_analyses_cli()
+    _handle_cli()
