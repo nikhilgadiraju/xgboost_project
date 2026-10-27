@@ -68,3 +68,15 @@ REG_ALPHA = 0 # 0 - 10
 SUBSAMPLE = 1.0 # 0.5 - 1.0
 COLSAMPLE_BYTREE = 0.888 # 0.5 - 1.0
 COLSAMPLE_BYLEVEL = 0.888 # 0.5 - 1.0
+
+# ---------------------------------------------------------------------
+# Paired-eye analysis configuration for manuscript revision               #
+# ---------------------------------------------------------------------
+PAIRED_RESULTS_FOLDER = os.path.join(ROOT_DIR, "results", "paired")
+PAIRED_RANDOM_SEED = 42
+PAIRED_BOOTSTRAP_REPLICATES = 2000
+PAIRING_RULE = "same_eye_camera_pair_first_image_by_image_id"
+DOWNSTREAM_MIN_VAL_AUC = 0.65
+PAIRED_MIN_VALIDATION_AUC = DOWNSTREAM_MIN_VAL_AUC
+DIABETES_CONCEPT_ID = 201826
+# ---------------------------------------------------------------------

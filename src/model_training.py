@@ -12,7 +12,7 @@ import itertools
 import matplotlib.pyplot as plt
 import xgboost as xgb
 from sklearn.metrics import r2_score
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import StratifiedKFold, StratifiedGroupKFold
 from config import *
 from utils import *
 import time
@@ -51,7 +51,7 @@ def generate_hyperparameter_combinations():
     }
     return [dict(zip(param_grid.keys(), values)) for values in itertools.product(*param_grid.values())]
 
-def cross_validation_model(X_train, y_train, params, cv_folds=3):
+def cross_validation_model(X_train, y_train, params, cv_folds=3, groups=None):
     """
     Performs k-fold cross-validation and returns the mean performance metric.
     For binary classification: Uses AUC and logloss
@@ -78,13 +78,37 @@ def cross_validation_model(X_train, y_train, params, cv_folds=3):
     cv_params = params.copy()
     n_estimators = cv_params.pop('n_estimators')
 
-    # Perform k-fold cross-validation with appropriate settings
+    # Perform k-fold cross-validation with appropriate settings. When groups are supplied,
+    # the grouped CV path is reserved for Step 3; the default main.py path does not change.
+    if groups is not None:
+        skf = StratifiedGroupKFold(n_splits=cv_folds, shuffle=True, random_state=42)
+        fold_scores = []
+        for train_idx, valid_idx in skf.split(X_train, y_train, groups):
+            fold_dtrain = xgb.DMatrix(X_train.iloc[train_idx], label=y_train.iloc[train_idx])
+            fold_dvalid = xgb.DMatrix(X_train.iloc[valid_idx], label=y_train.iloc[valid_idx])
+            booster = xgb.train(
+                params=cv_params,
+                dtrain=fold_dtrain,
+                num_boost_round=n_estimators,
+                evals=[(fold_dvalid, 'valid')],
+                early_stopping_rounds=10,
+                verbose_eval=False,
+            )
+            pred = booster.predict(fold_dvalid)
+            if CLASSIFICATION and not MULTI_CLASS:
+                fold_scores.append(roc_auc_score(y_train.iloc[valid_idx], pred))
+            else:
+                fold_scores.append(1.0 - accuracy_score(y_train.iloc[valid_idx], np.argmax(pred, axis=1)))
+        if CLASSIFICATION and not MULTI_CLASS:
+            return np.mean(fold_scores)
+        return np.mean(fold_scores)
+
     cv_results = xgb.cv(
         params=cv_params,
         dtrain=dtrain,
         num_boost_round=n_estimators,
         nfold=cv_folds,
-        stratified=CLASSIFICATION,          # Use stratified folds for binary classification
+        stratified=CLASSIFICATION,
         early_stopping_rounds=10,
         metrics='merror' if (CLASSIFICATION and MULTI_CLASS)
                else 'auc' if CLASSIFICATION
@@ -102,7 +126,7 @@ def cross_validation_model(X_train, y_train, params, cv_folds=3):
         return cv_results['test-rmse-mean'].iloc[-1]
         return final_rmse
 
-def manual_grid_search(X_train, y_train, cv_folds=3):
+def manual_grid_search(X_train, y_train, cv_folds=3, groups=None):
     """
     Performs a manual grid search for hyperparameter tuning with appropriate metrics
     based on the task type (binary classification or regression).
@@ -132,7 +156,7 @@ def manual_grid_search(X_train, y_train, cv_folds=3):
     # Evaluate each parameter combination
     for params in hyperparameter_combinations:
         print(f"Evaluating parameters: {params}")
-        mean_score = cross_validation_model(X_train, y_train, params, cv_folds)
+        mean_score = cross_validation_model(X_train, y_train, params, cv_folds, groups=groups)
         
         # Print appropriate metric based on task type
         metric_name = "Error Rate" if (CLASSIFICATION and MULTI_CLASS) else "AUC" if CLASSIFICATION else "RMSE"
@@ -208,7 +232,7 @@ def train_final_model(X_train, X_val, y_train, y_val, best_params):
 
     return final_model
 
-def evaluate_model(model, X_test, y_test, key, condition_label=None, label_encoder=None, filter_classes=None):
+def evaluate_model(model, X_test, y_test, key, condition_label=None, label_encoder=None, filter_classes=None, sample_metadata=None):
     """
     Evaluate model performance and create visualizations based on task type.
     
@@ -244,13 +268,15 @@ def evaluate_model(model, X_test, y_test, key, condition_label=None, label_encod
                     y_pred = y_pred[mask]
                     X_test = X_test[mask]
                     y_pred_proba = y_pred_proba[mask]
+                    if sample_metadata is not None:
+                        sample_metadata = sample_metadata.iloc[mask].copy()
 
             from sklearn.metrics import accuracy_score, classification_report
             accuracy = accuracy_score(y_test, y_pred)
             report = classification_report(y_test, y_pred, 
                                         labels=filter_classes if filter_classes else None,
                                         zero_division=0)
-            save_run_predictions(condition_label, y_test, y_pred, y_pred_proba)
+            save_run_predictions(condition_label, y_test, y_pred, y_pred_proba, sample_metadata=sample_metadata)
             metric = (accuracy, report)
             
             # Get timestamp for filename
@@ -273,7 +299,7 @@ def evaluate_model(model, X_test, y_test, key, condition_label=None, label_encod
             from sklearn.metrics import roc_auc_score, accuracy_score
             auc = roc_auc_score(y_test, y_pred_proba)
             accuracy = accuracy_score(y_test, y_pred)
-            save_run_predictions(condition_label, y_test, y_pred, y_pred_proba)
+            save_run_predictions(condition_label, y_test, y_pred, y_pred_proba, sample_metadata=sample_metadata)
             
             # Plot ROC curve with condition label in title
             roc_path = os.path.join(PLOTS_FOLDER, f'roc_curve_patient_{key}.png')
@@ -289,7 +315,7 @@ def evaluate_model(model, X_test, y_test, key, condition_label=None, label_encod
     else:
         y_pred = booster.predict(dtest)
         r2 = r2_score(y_test, y_pred)
-        save_run_predictions(condition_label, y_test, y_pred)
+        save_run_predictions(condition_label, y_test, y_pred, sample_metadata=sample_metadata)
         
         # Plot regression predictions with condition label in title
         plot_path = os.path.join(PLOTS_FOLDER, f'predictions_patient_{key}.png')

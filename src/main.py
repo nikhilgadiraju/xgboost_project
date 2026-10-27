@@ -10,8 +10,24 @@ from data_processing import *
 from model_training import *
 from utils import *
 from config import *
+from paired_analyses import run_paired_analysis
+import argparse
 import json
 import time
+
+def run_analysis_selection(df, condition_df, analysis_name):
+    """Run the requested analysis without invoking the training pipeline."""
+    if analysis_name in {"pairing", "all"}:
+        run_paired_analysis(df, condition_df)
+    if analysis_name in {"camera", "all"}:
+        from paired_analyses import paired_camera_classification_summary
+        paired_camera_classification_summary(df, os.path.join(PAIRED_RESULTS_FOLDER, "paired_camera_summary.csv"))
+    if analysis_name in {"diabetes", "all"}:
+        if condition_df is None:
+            condition_df = pd.read_csv(CONDITION_PATH)
+        from paired_analyses import downstream_diabetes_summary
+        downstream_diabetes_summary(df, condition_df, save_path=os.path.join(PAIRED_RESULTS_FOLDER, "downstream_diabetes_summary.csv"))
+
 
 def training_loop(df, condition_df, condition_dict, train_filter_classes=None, eval_filter_classes=None):
     # Initialize the output metrics value dataframe
@@ -27,6 +43,17 @@ def training_loop(df, condition_df, condition_dict, train_filter_classes=None, e
                 # Rest of processing uses filtered data
                 X_train, X_val, X_test, y_train, y_val, y_test, label_encoder = prepare_data(
                     features, health_condition, recommended_split)
+                
+                # Preserve row-aligned metadata from the filtered test set for prediction exports.
+                metadata_df = df.copy()
+                if train_filter_classes is not None:
+                    mask = np.isin(metadata_df['protocol'], train_filter_classes)
+                    metadata_df = metadata_df.loc[mask].copy()
+                test_metadata = metadata_df.loc[metadata_df['recommended_split'] == 'test', ['id', 'eye', 'filename', 'recommended_split']].copy()
+                if len(test_metadata) != len(y_test):
+                    raise ValueError(f"Filtered test metadata rows ({len(test_metadata)}) do not match evaluation rows ({len(y_test)}).")
+                if test_metadata['filename'].duplicated().any():
+                    raise ValueError("Filtered test metadata contains duplicate filenames.")
                 
                 # Check class distribution
                 is_valid, class_dist = check_class_distribution(
@@ -51,7 +78,8 @@ def training_loop(df, condition_df, condition_dict, train_filter_classes=None, e
                     key='multi_class', 
                     condition_label='Camera Types',
                     label_encoder=label_encoder,
-                    filter_classes=eval_filter_classes  # Additional filtering at evaluation
+                    filter_classes=eval_filter_classes,
+                    sample_metadata=test_metadata,
                 )
                 
                 # Update metrics DataFrame
@@ -103,6 +131,14 @@ def training_loop(df, condition_df, condition_dict, train_filter_classes=None, e
             X_train, X_val, X_test, y_train, y_val, y_test, label_encoder = prepare_data(
                 features, health_condition, recommended_split)
             
+            # Keep row-aligned metadata for the test set so predictions can include identifiers.
+            metadata_df = df.copy()
+            test_metadata = metadata_df.loc[metadata_df['recommended_split'] == 'test', ['id', 'eye', 'filename', 'recommended_split']].copy()
+            if len(test_metadata) != len(y_test):
+                raise ValueError(f"Test metadata rows ({len(test_metadata)}) do not match evaluation rows ({len(y_test)}).")
+            if test_metadata['filename'].duplicated().any():
+                raise ValueError("Test metadata contains duplicate filenames.")
+            
             # Check class distribution in all splits
             if CLASSIFICATION:
                 skip_condition = False
@@ -133,7 +169,8 @@ def training_loop(df, condition_df, condition_dict, train_filter_classes=None, e
                     accuracy, report = evaluate_model(
                         final_model, X_test, y_test, key=key, 
                         condition_label=condition_dict[key],
-                        label_encoder=label_encoder)
+                        label_encoder=label_encoder,
+                        sample_metadata=test_metadata)
                     
                     metrics_df.loc[condition_label] = [key, accuracy, report]
                     print(f"\nAccuracy: {accuracy:.3f}")
@@ -143,7 +180,8 @@ def training_loop(df, condition_df, condition_dict, train_filter_classes=None, e
                     accuracy, auc_score = evaluate_model(
                         final_model, X_test, y_test, key=key, 
                         condition_label=condition_dict[key],
-                        label_encoder=None)
+                        label_encoder=None,
+                        sample_metadata=test_metadata)
                     
                     metrics_df.loc[condition_label] = [key, accuracy, auc_score]
                     
@@ -155,7 +193,8 @@ def training_loop(df, condition_df, condition_dict, train_filter_classes=None, e
                             print("High performance model - confusion matrix generated")
             else:
                 r2 = evaluate_model(final_model, X_test, y_test, 
-                                  key=key, condition_label=condition_dict[key])
+                                  key=key, condition_label=condition_dict[key],
+                                  sample_metadata=test_metadata)
                 metrics_df.loc[condition_label] = [key, r2]
                 print(f"R²: {r2:.3f}")
 
@@ -285,10 +324,24 @@ def main(loop=False, train_filter_classes=None, eval_filter_classes=None):
             except IndexError:
                 print("\nNo valid R² value available for regression")
 
+
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="XGBoost camera classification pipeline")
+    parser.add_argument("--analysis", choices=["training", "pairing", "camera", "diabetes", "all"], default="training")
+    parser.add_argument("--train-filter-classes", nargs="*", default=None)
+    parser.add_argument("--eval-filter-classes", nargs="*", default=None)
+    args = parser.parse_args()
+
+    if args.analysis != "training":
+        df = load_dataset(CSV_PATH)
+        condition_df = pd.read_csv(CONDITION_PATH) if os.path.exists(CONDITION_PATH) else None
+        os.makedirs(PAIRED_RESULTS_FOLDER, exist_ok=True)
+        run_analysis_selection(df, condition_df, args.analysis)
+        raise SystemExit(0)
+
     # Example 1: Filter both training and evaluation
     # Removed classes: "triton_macula_12x12", "eidon_mosaic"
-    
+
     # Example 1: All classes present
     train_classes_1 = [
         "uwf_central",
@@ -314,11 +367,21 @@ if __name__ == "__main__":
         "macula_6x6"
     ]
 
-    eval_classes = None
+    eval_classes = args.eval_filter_classes
+    if args.train_filter_classes is not None:
+        train_classes = args.train_filter_classes
+    else:
+        train_classes = train_classes_1
 
-    for classes in [train_classes_3]:
+    if not args.train_filter_classes and not args.eval_filter_classes:
         run_with_logging(
             main,
             loop=True,
-            train_filter_classes=classes,
+            train_filter_classes=train_classes,
+            eval_filter_classes=eval_classes)
+    else:
+        run_with_logging(
+            main,
+            loop=True,
+            train_filter_classes=train_classes,
             eval_filter_classes=eval_classes)

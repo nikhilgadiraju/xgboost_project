@@ -157,14 +157,30 @@ def record_run_data(section, value):
         ACTIVE_RUN[section] = _json_safe(value)
 
 
-def save_run_predictions(condition_label, y_true, y_pred, probabilities=None):
-    """Save predictions for one evaluation and register the artifact."""
-    if ACTIVE_RUN is None:
+def _prediction_metadata_columns(sample_metadata=None):
+    """Normalize identifier metadata for saved prediction rows."""
+    if sample_metadata is None:
         return None
-    prediction_dir = os.path.join(ACTIVE_RUN["run_directory"], "predictions")
-    os.makedirs(prediction_dir, exist_ok=True)
-    filename = f"predictions_{len(ACTIVE_RUN['predictions']) + 1:03d}.csv"
-    path = os.path.join(prediction_dir, filename)
+
+    metadata = sample_metadata.copy()
+    if "id" not in metadata.columns and "participant_id" in metadata.columns:
+        metadata["id"] = metadata["participant_id"]
+    if "eye" not in metadata.columns and "laterality" in metadata.columns:
+        metadata["eye"] = metadata["laterality"]
+    if "filename" not in metadata.columns and "image_filename" in metadata.columns:
+        metadata["filename"] = metadata["image_filename"]
+    if "recommended_split" not in metadata.columns and "split" in metadata.columns:
+        metadata["recommended_split"] = metadata["split"]
+
+    required = ["id", "eye", "filename", "recommended_split"]
+    missing = [column for column in required if column not in metadata.columns]
+    if missing:
+        return metadata
+    return metadata[required].copy()
+
+
+def _build_prediction_row_data(condition_label, y_true, y_pred, probabilities=None, sample_metadata=None):
+    """Build the prediction export with aligned identifiers and probability columns."""
     prediction_data = {
         "condition": [condition_label] * len(y_true),
         "y_true": _json_safe(y_true),
@@ -176,13 +192,49 @@ def save_run_predictions(condition_label, y_true, y_pred, probabilities=None):
             prediction_data["predicted_probability"] = _json_safe(probabilities)
         else:
             for index in range(probabilities.shape[1]):
-                prediction_data[f"predicted_probability_class_{index}"] = _json_safe(
-                    probabilities[:, index])
-    pd.DataFrame(prediction_data).to_csv(path, index=False)
+                prediction_data[f"predicted_probability_class_{index}"] = _json_safe(probabilities[:, index])
+
+    if sample_metadata is None:
+        return pd.DataFrame(prediction_data)
+
+    metadata = _prediction_metadata_columns(sample_metadata)
+    if metadata is None:
+        return pd.DataFrame(prediction_data)
+
+    if len(metadata) != len(y_true):
+        raise ValueError(f"Prediction metadata row count ({len(metadata)}) does not match the test set ({len(y_true)}).")
+
+    prediction_df = pd.DataFrame(prediction_data)
+    prediction_df = pd.concat([metadata.reset_index(drop=True), prediction_df], axis=1)
+    if len(prediction_df) != len(y_true):
+        raise ValueError(f"Prediction export rows ({len(prediction_df)}) do not match the evaluation rows ({len(y_true)}).")
+    if "filename" in prediction_df.columns and not prediction_df["filename"].is_unique:
+        duplicate_filenames = prediction_df["filename"][prediction_df["filename"].duplicated()].tolist()
+        raise ValueError(f"Prediction export contains duplicate filenames: {duplicate_filenames[:10]}")
+    return prediction_df
+
+
+def save_run_predictions(condition_label, y_true, y_pred, probabilities=None, sample_metadata=None):
+    """Save predictions for one evaluation and register the artifact."""
+    if ACTIVE_RUN is None:
+        return None
+    prediction_dir = os.path.join(ACTIVE_RUN["run_directory"], "predictions")
+    os.makedirs(prediction_dir, exist_ok=True)
+    filename = f"predictions_{len(ACTIVE_RUN['predictions']) + 1:03d}.csv"
+    path = os.path.join(prediction_dir, filename)
+
+    prediction_df = _build_prediction_row_data(
+        condition_label=condition_label,
+        y_true=y_true,
+        y_pred=y_pred,
+        probabilities=probabilities,
+        sample_metadata=sample_metadata,
+    )
+    prediction_df.to_csv(path, index=False)
     ACTIVE_RUN["predictions"].append({
         "condition": condition_label,
         "path": path,
-        "rows": len(y_true),
+        "rows": len(prediction_df),
     })
     return path
 
@@ -204,6 +256,38 @@ def finish_run(status="completed", error=None):
     return run_directory
 
 
+def build_run_directory_name(train_filter_classes=None):
+    """Build a compact saved run directory name including vector source and class subset."""
+    vector_path = os.path.basename(CSV_PATH if isinstance(CSV_PATH, str) else "")
+    if "pretrained" in vector_path.lower() or "pre-trained" in vector_path.lower() or "pre_trained" in vector_path.lower():
+        vector_tag = "pt"
+    elif "fine-tuned" in vector_path.lower() or "finetuned" in vector_path.lower() or "fine_tuned" in vector_path.lower():
+        vector_tag = "ft"
+    else:
+        vector_tag = "vec"
+
+    if train_filter_classes is None:
+        task_tag = "all"
+    else:
+        task_set = set(train_filter_classes)
+        if task_set == {"uwf_central", "uwf_nasal", "macula", "wide", "mac_or_disk", "radial", "macula_6x6"}:
+            task_tag = "cls1"
+        elif task_set == {"uwf_central", "macula", "mac_or_disk", "macula_6x6"}:
+            task_tag = "cls2"
+        elif task_set == {"macula", "macula_6x6"}:
+            task_tag = "cls3"
+        elif len(train_filter_classes) == 7:
+            task_tag = "cls1"
+        elif len(train_filter_classes) == 4:
+            task_tag = "cls2"
+        elif len(train_filter_classes) == 2:
+            task_tag = "cls3"
+        else:
+            task_tag = f"cls{len(train_filter_classes)}"
+
+    return f"{vector_tag}_{task_tag}"
+
+
 def run_with_logging(function, *args, **kwargs):
     """Run a callable while mirroring terminal output into the run manifest."""
     run = start_run()
@@ -212,6 +296,13 @@ def run_with_logging(function, *args, **kwargs):
     error = None
     output_buffer = io.StringIO()
     try:
+        if function.__name__ != "_run_paired_analysis_pipeline" and function.__name__ != "run_paired_analyses_cli":
+            train_filter_classes = kwargs.get("train_filter_classes")
+            run_label = build_run_directory_name(train_filter_classes)
+            old_path = run["run_directory"]
+            new_path = os.path.join(SAVED_RUNS_FOLDER, f"{run_label}_{os.path.basename(old_path)}")
+            os.rename(old_path, new_path)
+            run["run_directory"] = new_path
         with open(os.path.join(run["run_directory"], "terminal.log"), "w") as log_file:
             with redirect_stdout(_Tee(original_stdout, log_file, output_buffer)):
                 result = function(*args, **kwargs)
