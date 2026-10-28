@@ -12,6 +12,8 @@ Key requirements enforced here:
 - participant-level bootstrap 95% CIs are computed across test-set participants.
 """
 
+import ast
+import json
 import os
 import sys
 import time
@@ -796,6 +798,7 @@ def _run_downstream_stage_1(
                     "n_val": int(len(val_df)),
                     "val_auc": val_auc,
                     "cv_best_auc": best_auc,
+                    "best_iteration": int(best_iter) if best_iter is not None else None,
                     "best_params": best_params,
                     "concept_name": condition_name,
                 }
@@ -810,14 +813,581 @@ def _run_downstream_stage_1(
     return summary
 
 
-def run_downstream_condition_stage_1(
+def _youden_j_threshold(y_true: np.ndarray, y_prob: np.ndarray) -> float:
+    """Choose the validation threshold that maximizes Youden's J statistic."""
+    y_true = np.asarray(y_true).astype(int)
+    y_prob = np.asarray(y_prob).astype(float)
+    thresholds = np.unique(np.sort(y_prob))
+    if thresholds.size == 0:
+        return 0.5
+
+    best_threshold = 0.5
+    best_j = -np.inf
+    for threshold in thresholds:
+        pred = (y_prob >= threshold).astype(int)
+        tp = np.sum((pred == 1) & (y_true == 1))
+        fp = np.sum((pred == 1) & (y_true == 0))
+        tn = np.sum((pred == 0) & (y_true == 0))
+        fn = np.sum((pred == 0) & (y_true == 1))
+        sens = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        spec = tn / (tn + fp) if (tn + fp) > 0 else 0.0
+        j = sens + spec - 1.0
+        if j > best_j:
+            best_j = j
+            best_threshold = float(threshold)
+    return float(best_threshold)
+
+
+def _bootstrap_auc_with_resample(y_true: np.ndarray, y_prob: np.ndarray, participant_ids: np.ndarray, n_boot: int = 2000, seed: int = 42):
+    """Participant-level bootstrap AUC CI with skipped replicates counted."""
+    y_true = np.asarray(y_true).astype(int)
+    y_prob = np.asarray(y_prob).astype(float)
+    participant_ids = np.asarray(participant_ids)
+    if y_true.size == 0 or y_prob.size == 0 or participant_ids.size == 0:
+        return float("nan"), float("nan"), 0, 0
+    if len(np.unique(y_true)) < 2:
+        return float("nan"), float("nan"), 0, 0
+
+    unique_participants = np.unique(participant_ids)
+    rng = np.random.default_rng(seed)
+    auc_values = []
+    skipped = 0
+    for _ in range(n_boot):
+        sampled = rng.choice(unique_participants, size=len(unique_participants), replace=True)
+        idx = []
+        for pid in sampled:
+            idx.extend(np.where(participant_ids == pid)[0].tolist())
+        if not idx:
+            skipped += 1
+            continue
+        sampled_y = np.asarray(y_true)[idx]
+        sampled_p = np.asarray(y_prob)[idx]
+        if len(np.unique(sampled_y)) < 2:
+            skipped += 1
+            continue
+        try:
+            auc_values.append(float(roc_auc_score(sampled_y, sampled_p)))
+        except ValueError:
+            skipped += 1
+            continue
+
+    if not auc_values:
+        return float("nan"), float("nan"), 0, int(n_boot)
+
+    auc_low, auc_high = np.percentile(auc_values, [2.5, 97.5])
+    return float(auc_low), float(auc_high), len(auc_values), int(skipped)
+
+
+def _bootstrap_camera_auc_difference(
+    y_true_a: np.ndarray,
+    y_prob_a: np.ndarray,
+    participant_ids_a: np.ndarray,
+    y_true_b: np.ndarray,
+    y_prob_b: np.ndarray,
+    participant_ids_b: np.ndarray,
+    n_boot: int = 2000,
+    seed: int = 42,
+):
+    """Resample test participants with replacement, recompute both camera AUCs, and return the percentile CI for the same signed difference as the point estimate."""
+    y_true_a = np.asarray(y_true_a).astype(int)
+    y_prob_a = np.asarray(y_prob_a).astype(float)
+    participant_ids_a = np.asarray(participant_ids_a)
+    y_true_b = np.asarray(y_true_b).astype(int)
+    y_prob_b = np.asarray(y_prob_b).astype(float)
+    participant_ids_b = np.asarray(participant_ids_b)
+
+    if y_true_a.size == 0 or y_true_b.size == 0:
+        return float("nan"), float("nan"), 0, 0
+
+    common_participants = np.intersect1d(np.unique(participant_ids_a), np.unique(participant_ids_b))
+    if common_participants.size == 0:
+        return float("nan"), float("nan"), 0, int(n_boot)
+
+    rng = np.random.default_rng(seed)
+    diffs = []
+    skipped = 0
+    for _ in range(n_boot):
+        sampled = rng.choice(common_participants, size=len(common_participants), replace=True)
+        idx_a = []
+        idx_b = []
+        for pid in sampled:
+            idx_a.extend(np.where(participant_ids_a == pid)[0].tolist())
+            idx_b.extend(np.where(participant_ids_b == pid)[0].tolist())
+        if not idx_a or not idx_b:
+            skipped += 1
+            continue
+        sampled_y_a = y_true_a[idx_a]
+        sampled_p_a = y_prob_a[idx_a]
+        sampled_y_b = y_true_b[idx_b]
+        sampled_p_b = y_prob_b[idx_b]
+        if len(np.unique(sampled_y_a)) < 2 or len(np.unique(sampled_y_b)) < 2:
+            skipped += 1
+            continue
+        try:
+            auc_a = float(roc_auc_score(sampled_y_a, sampled_p_a))
+            auc_b = float(roc_auc_score(sampled_y_b, sampled_p_b))
+            diffs.append(auc_a - auc_b)
+        except ValueError:
+            skipped += 1
+            continue
+
+    if not diffs:
+        return float("nan"), float("nan"), 0, int(n_boot)
+
+    diff_low, diff_high = np.percentile(diffs, [2.5, 97.5])
+    return float(diff_low), float(diff_high), len(diffs), int(skipped)
+
+
+def _coerce_camera_test_df(frame: pd.DataFrame, camera_name: str, experiment_name: str, vector_name: str, model_label: str) -> pd.DataFrame:
+    """Subset the paired test dataset to a given camera and attach model metadata."""
+    camera_df = frame[(frame["camera_name"] == camera_name) & (frame["recommended_split"] == "test")].copy()
+    camera_df["experiment"] = experiment_name
+    camera_df["vector_set"] = vector_name
+    camera_df["model_label"] = model_label
+    return camera_df
+
+
+def _deserialize_best_params(value):
+    """Deserialize Stage 1 hyperparameters from a CSV string or dict-like object."""
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return {}
+        try:
+            parsed = ast.literal_eval(text)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            pass
+        try:
+            parsed = json.loads(text.replace("'", '"'))
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            pass
+    return {}
+
+
+def _stage2_model_from_summary(row: pd.Series) -> xgb.XGBClassifier:
+    """Construct the exact Stage 1 model from its saved hyperparameters and best iteration."""
+    params = _deserialize_best_params(row.get("best_params"))
+    best_iter = row.get("best_iteration")
+    if best_iter is None:
+        if "n_estimators" in params:
+            best_iter = int(params["n_estimators"]) - 1
+        else:
+            raise ValueError(f"Stage 1 summary row is missing best_iteration and n_estimators: {row.to_dict()}")
+    model_params = dict(params)
+    if "n_estimators" in model_params:
+        model_params["n_estimators"] = int(best_iter) + 1
+    else:
+        model_params["n_estimators"] = int(best_iter) + 1
+    model_params["objective"] = "binary:logistic"
+    model_params["tree_method"] = "hist"
+    model_params["device"] = "cuda"
+    model_params["eval_metric"] = "logloss"
+    model = xgb.XGBClassifier(
+        **model_params,
+        random_state=PAIRED_RANDOM_SEED,
+        n_jobs=1,
+    )
+    return model
+
+
+def _validate_stage1_reproduction(stage1_summary: pd.DataFrame, expected_lookup: dict) -> None:
+    """Verify the Stage 1 validation AUCs match the saved summary within tolerance before any test evaluation."""
+    print("\nStage 1 reproduction check (validation AUCs and exact saved model specs)")
+    mismatch_rows = []
+    expected_order = [
+        ("pretrained", "A_both"),
+        ("pretrained", "B_maestro2_only"),
+        ("pretrained", "C_triton_only"),
+        ("fine_tuned", "A_both"),
+        ("fine_tuned", "B_maestro2_only"),
+        ("fine_tuned", "C_triton_only"),
+    ]
+    for vector_set, experiment in expected_order:
+        row = stage1_summary[(stage1_summary["vector_set"] == vector_set) & (stage1_summary["experiment"] == experiment)].iloc[0]
+        observed = float(row["val_auc"])
+        expected = float(expected_lookup[(vector_set, experiment)])
+        params = _deserialize_best_params(row.get("best_params"))
+        best_iter = row.get("best_iteration") if row.get("best_iteration") is not None else (int(params.get("n_estimators", 0)) - 1 if "n_estimators" in params else None)
+        model = _stage2_model_from_summary(pd.Series(row))
+        actual_trees = int(model.get_params().get("n_estimators", 0))
+        print(
+            f"{vector_set:>10} {experiment:<18} val_auc={observed:.4f} expected={expected:.4f} "
+            f"delta={abs(observed - expected):.6f} trees_used={actual_trees} stage1_best_iter={best_iter} params={params}"
+        )
+        if abs(observed - expected) > 1e-3:
+            mismatch_rows.append({
+                "vector_set": vector_set,
+                "experiment": experiment,
+                "observed": observed,
+                "expected": expected,
+                "delta": abs(observed - expected),
+            })
+    if mismatch_rows:
+        print("\nStage 1 validation AUC mismatch detected before Stage 2 test evaluation:")
+        print(pd.DataFrame(mismatch_rows).to_string(index=False))
+        raise ValueError("Stage 1 validation AUCs do not match the required reference values; aborting before test set evaluation.")
+
+
+def _print_stage2_table_1(summary_rows: list[dict]) -> pd.DataFrame:
+    """Print the requested AUC table comparing Maestro2 vs Triton for each training regime."""
+    table = []
+    for item in summary_rows:
+        table.append({
+            "vector_set": item["vector_set"],
+            "trained_on": item.get("trained_on", item.get("experiment_label", "unknown")),
+            "tested_on_Maestro2_auc": item["maestro2_auc"],
+            "tested_on_Maestro2_ci": item["maestro2_ci"],
+            "tested_on_Triton_auc": item["triton_auc"],
+            "tested_on_Triton_ci": item["triton_ci"],
+            "difference_auc": item["difference_auc"],
+            "difference_ci": item["difference_ci"],
+        })
+    table_df = pd.DataFrame(table)
+    print("\nTable 1: test-set camera AUC comparison")
+    print(table_df.to_string(index=False))
+    return table_df
+
+
+def _print_stage2_table_2(agreement_rows: list[dict]) -> pd.DataFrame:
+    """Print the same-eye agreement table for experiment A by vector set."""
+    table = pd.DataFrame(agreement_rows)
+    print("\nTable 2: same-eye agreement (experiment A)")
+    print(table.to_string(index=False))
+    return table
+
+
+def _run_downstream_stage_2(
     condition_concept_id: int = 4317977,
     condition_label: str = "cataract",
-    stage: int = 1,
+    stage: int = 2,
 ) -> pd.DataFrame:
-    """CLI-friendly wrapper for the downstream Stage 1 condition analysis."""
-    result = run_with_logging(_run_downstream_stage_1, condition_concept_id, condition_label, stage)
-    print("\nSaved downstream Stage 1 analysis with paired_analyses prefix in saved_runs.")
+    """Run the Stage 2 downstream test-set evaluation using the exact Stage 1 models and settings."""
+    if stage != 2:
+        raise ValueError("This file implements downstream condition Stage 2 via --stage 2.")
+
+    normalized_label = _normalize_condition_label(condition_label)
+    effective_concept_id = int(condition_concept_id)
+    if effective_concept_id != DOWNSTREAM_CONDITION_MAP[normalized_label]["concept_id"]:
+        effective_concept_id = DOWNSTREAM_CONDITION_MAP[normalized_label]["concept_id"]
+
+    summary_path = os.path.join(PAIRED_RESULTS_FOLDER, f"downstream_stage1_{normalized_label}_{effective_concept_id}.csv")
+    if not os.path.exists(summary_path):
+        raise FileNotFoundError(f"Stage 1 summary not found: {summary_path}")
+
+    stage1_summary = pd.read_csv(summary_path)
+    if stage1_summary.empty:
+        raise ValueError("Stage 1 summary is empty; Stage 2 cannot proceed.")
+    expected_lookup = {
+        ("pretrained", "A_both"): 0.8412,
+        ("pretrained", "B_maestro2_only"): 0.8260,
+        ("pretrained", "C_triton_only"): 0.8464,
+        ("fine_tuned", "A_both"): 0.8525,
+        ("fine_tuned", "B_maestro2_only"): 0.8181,
+        ("fine_tuned", "C_triton_only"): 0.8683,
+    }
+    _validate_stage1_reproduction(stage1_summary, expected_lookup)
+
+    paired_df = pd.read_csv(os.path.join(PAIRED_RESULTS_FOLDER, "paired_eyes.csv"))
+    condition_df = pd.read_csv(CONDITION_PATH)
+    condition_df = condition_df.copy()
+    condition_df["person_id"] = pd.to_numeric(condition_df["person_id"], errors="coerce")
+    condition_df["condition_concept_id"] = pd.to_numeric(condition_df["condition_concept_id"], errors="coerce")
+    condition_df = condition_df[condition_df["person_id"].notna()].copy()
+    condition_df["person_id"] = condition_df["person_id"].astype(int)
+
+    label_df = _build_downstream_label_frame(
+        paired_df,
+        condition_df,
+        concept_id=effective_concept_id,
+        condition_name=normalized_label,
+    )
+    paired_kept = paired_df.merge(
+        label_df[["person_id", f"{normalized_label}_label"]].rename(columns={"person_id": "participant_id"}),
+        on="participant_id",
+        how="inner",
+    )
+
+    experiment_map = {
+        "A_both": "both",
+        "B_maestro2_only": "Maestro2",
+        "C_triton_only": "Triton",
+    }
+    model_rows = []
+    for _, row in stage1_summary.iterrows():
+        vector_set = str(row["vector_set"])
+        experiment = str(row["experiment"])
+        if vector_set not in {"pretrained", "fine_tuned"}:
+            continue
+        model_rows.append({
+            "vector_set": vector_set,
+            "experiment": experiment,
+            "experiment_label": experiment_map.get(experiment, experiment),
+            "best_params": row["best_params"],
+            "best_iteration": row.get("best_iteration"),
+            "val_auc": float(row["val_auc"]),
+        })
+
+    all_test_predictions = []
+    all_summary_rows = []
+    agreement_rows = []
+    test_table_rows = []
+    same_eye_results = {}
+
+    for vector_name in ["pretrained", "fine_tuned"]:
+        latent_path = "/home/s440308/Documents/20_github/xgboost_project/data/results_pre-trained_20250703.csv" if vector_name == "pretrained" else "/home/s440308/Documents/20_github/xgboost_project/data/results_fine-tuned_20250703.csv"
+        latent_df = pd.read_csv(latent_path)
+        camera_df = _build_paired_camera_dataset(latent_df, paired_kept[["participant_id", "laterality", "recommended_split", "macula", "macula_6x6"]])
+        camera_df = camera_df.merge(
+            label_df[["person_id", f"{normalized_label}_label"]].rename(columns={"person_id": "participant_id"}),
+            on="participant_id",
+            how="inner",
+        )
+        camera_df["target_label"] = camera_df[f"{normalized_label}_label"].astype(int)
+
+        for experiment_name in ["A_both", "B_maestro2_only", "C_triton_only"]:
+            model_row = next((m for m in model_rows if m["vector_set"] == vector_name and m["experiment"] == experiment_name), None)
+            if model_row is None:
+                continue
+            train_df = camera_df[(camera_df["recommended_split"] == "train") & _downstream_experiment_mask(camera_df, experiment_name)].copy()
+            val_df = camera_df[(camera_df["recommended_split"] == "val") & _downstream_experiment_mask(camera_df, experiment_name)].copy()
+            test_df = camera_df[(camera_df["recommended_split"] == "test")].copy()
+            if train_df.empty or val_df.empty or test_df.empty:
+                continue
+
+            feature_cols = [column for column in camera_df.columns if column.startswith("feature_")]
+            X_train = train_df[feature_cols].astype(float)
+            X_val = val_df[feature_cols].astype(float)
+            y_train = train_df["target_label"].astype(int).to_numpy()
+            y_val = val_df["target_label"].astype(int).to_numpy()
+            g_train = train_df["participant_id"].astype(int).to_numpy()
+
+            if len(np.unique(y_train)) < 2 or len(np.unique(y_val)) < 2:
+                continue
+
+            model = _stage2_model_from_summary(pd.Series(model_row))
+            model.fit(X_train, y_train, eval_set=[(X_val, y_val)], verbose=False)
+            val_prob = model.predict_proba(X_val)[:, 1]
+            threshold = _youden_j_threshold(y_val, val_prob)
+
+            for camera_name in ["Maestro2", "Triton"]:
+                camera_test_df = _coerce_camera_test_df(test_df, camera_name=camera_name, experiment_name=experiment_name, vector_name=vector_name, model_label=f"{vector_name}_{experiment_name}")
+                if camera_test_df.empty:
+                    continue
+                X_test = camera_test_df[feature_cols].astype(float)
+                y_test = camera_test_df["target_label"].astype(int).to_numpy()
+                participant_ids = camera_test_df["participant_id"].astype(int).to_numpy()
+                prob = model.predict_proba(X_test)[:, 1]
+                pred = (prob >= threshold).astype(int)
+                balanced_acc = float((pred == y_test).mean()) if len(y_test) else np.nan
+                tp = np.sum((pred == 1) & (y_test == 1))
+                fn = np.sum((pred == 0) & (y_test == 1))
+                tn = np.sum((pred == 0) & (y_test == 0))
+                fp = np.sum((pred == 1) & (y_test == 0))
+                sensitivity = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+                specificity = tn / (tn + fp) if (tn + fp) > 0 else 0.0
+                balanced_accuracy = (sensitivity + specificity) / 2.0 if (sensitivity + specificity) > 0 else 0.0
+                accuracy = float((pred == y_test).mean()) if len(y_test) else np.nan
+                auc_score = float(roc_auc_score(y_test, prob)) if len(np.unique(y_test)) >= 2 else float("nan")
+                auc_low, auc_high, n_valid_boot, skipped = _bootstrap_auc_with_resample(y_test, prob, participant_ids, n_boot=2000, seed=PAIRED_RANDOM_SEED)
+                row_summary = {
+                    "vector_set": vector_name,
+                    "experiment": experiment_name,
+                    "trained_on": experiment_map.get(experiment_name, experiment_name),
+                    "camera": camera_name,
+                    "n_test_eyes": int(len(camera_test_df)),
+                    "n_participants": int(camera_test_df["participant_id"].nunique()),
+                    "n_positive_participants": int(camera_test_df.loc[camera_test_df["target_label"] == 1, "participant_id"].nunique()),
+                    "auc": auc_score,
+                    "auc_ci_low": auc_low,
+                    "auc_ci_high": auc_high,
+                    "balanced_accuracy": balanced_accuracy,
+                    "accuracy": accuracy,
+                    "sensitivity": float(sensitivity),
+                    "specificity": float(specificity),
+                    "threshold": float(threshold),
+                    "bootstrap_replicates_used": int(n_valid_boot),
+                    "bootstrap_replicates_skipped": int(skipped),
+                }
+                all_summary_rows.append(row_summary)
+
+                for idx, row in camera_test_df.iterrows():
+                    all_test_predictions.append({
+                        "id": row.get("image_filename") or row.get("filename") or row.name,
+                        "participant_id": int(row["participant_id"]),
+                        "eye": row.get("laterality"),
+                        "filename": row.get("image_filename") or row.get("filename"),
+                        "camera": camera_name,
+                        "split": "test",
+                        "label": int(row["target_label"]),
+                        "probability": float(prob[list(camera_test_df.index).index(row.name)]),
+                        "experiment": experiment_name,
+                        "vector_set": vector_name,
+                    })
+
+                if experiment_name == "A_both":
+                    pair_df = camera_test_df[["participant_id", "laterality", "target_label"]].copy()
+                    pair_df["probability"] = prob
+                    pair_df["camera"] = camera_name
+                    if camera_name == "Maestro2":
+                        maestro_pair = pair_df.rename(columns={"probability": "maestro_prob", "target_label": "maestro_label"})
+                    else:
+                        triton_pair = pair_df.rename(columns={"probability": "triton_prob", "target_label": "triton_label"})
+
+                    if "maestro_pair" in locals() and "triton_pair" in locals():
+                        same_eye_df = maestro_pair.merge(triton_pair[["participant_id", "laterality", "triton_prob", "triton_label"]], on=["participant_id", "laterality"], how="inner")
+                        if not same_eye_df.empty:
+                            pearson_r = same_eye_df[["maestro_prob", "triton_prob"]].corr(method="pearson").iloc[0, 1]
+                            spearman_r = same_eye_df[["maestro_prob", "triton_prob"]].corr(method="spearman").iloc[0, 1]
+                            mad = float(np.abs(same_eye_df["maestro_prob"] - same_eye_df["triton_prob"]).mean())
+                            same_class_valid = float((same_eye_df["maestro_prob"] >= threshold).astype(int).eq((same_eye_df["triton_prob"] >= threshold).astype(int)).mean())
+                            same_class_05 = float((same_eye_df["maestro_prob"] >= 0.5).astype(int).eq((same_eye_df["triton_prob"] >= 0.5).astype(int)).mean())
+                            same_eye_results[vector_name] = {
+                                "vector_set": vector_name,
+                                "pearson_r": float(pearson_r),
+                                "spearman_r": float(spearman_r),
+                                "mean_abs_diff": mad,
+                                "same_predicted_class_at_validation_threshold_pct": same_class_valid,
+                                "same_predicted_class_at_0_5_pct": same_class_05,
+                                "n_eyes": int(len(same_eye_df)),
+                                "validation_threshold": float(threshold),
+                            }
+
+    for vector_name in ["pretrained", "fine_tuned"]:
+        for experiment_name in ["A_both", "B_maestro2_only", "C_triton_only"]:
+            exp_rows = [r for r in all_summary_rows if r["vector_set"] == vector_name and r["experiment"] == experiment_name]
+            if len(exp_rows) < 2:
+                continue
+            if experiment_name == "A_both":
+                maestro = next((r for r in exp_rows if r["camera"] == "Maestro2"), None)
+                triton = next((r for r in exp_rows if r["camera"] == "Triton"), None)
+                if maestro and triton:
+                    diff = float(triton["auc"]) - float(maestro["auc"])
+                    m_a = np.asarray([row["probability"] for row in all_test_predictions if row["vector_set"] == vector_name and row["experiment"] == experiment_name and row["camera"] == "Maestro2"], dtype=float)
+                    y_a = np.asarray([row["label"] for row in all_test_predictions if row["vector_set"] == vector_name and row["experiment"] == experiment_name and row["camera"] == "Maestro2"], dtype=int)
+                    p_a = np.asarray([row["participant_id"] for row in all_test_predictions if row["vector_set"] == vector_name and row["experiment"] == experiment_name and row["camera"] == "Maestro2"], dtype=int)
+                    m_b = np.asarray([row["probability"] for row in all_test_predictions if row["vector_set"] == vector_name and row["experiment"] == experiment_name and row["camera"] == "Triton"], dtype=float)
+                    y_b = np.asarray([row["label"] for row in all_test_predictions if row["vector_set"] == vector_name and row["experiment"] == experiment_name and row["camera"] == "Triton"], dtype=int)
+                    p_b = np.asarray([row["participant_id"] for row in all_test_predictions if row["vector_set"] == vector_name and row["experiment"] == experiment_name and row["camera"] == "Triton"], dtype=int)
+                    diff_low, diff_high, diff_n, diff_skipped = _bootstrap_camera_auc_difference(y_b, m_b, p_b, y_a, m_a, p_a, n_boot=2000, seed=PAIRED_RANDOM_SEED)
+                    test_table_rows.append({
+                        "vector_set": vector_name,
+                        "trained_on": "both",
+                        "maestro2_auc": maestro["auc"],
+                        "maestro2_ci": f"[{maestro['auc_ci_low']:.4f}, {maestro['auc_ci_high']:.4f}]" if pd.notna(maestro.get("auc_ci_low")) and pd.notna(maestro.get("auc_ci_high")) else "n/a",
+                        "triton_auc": triton["auc"],
+                        "triton_ci": f"[{triton['auc_ci_low']:.4f}, {triton['auc_ci_high']:.4f}]" if pd.notna(triton.get("auc_ci_low")) and pd.notna(triton.get("auc_ci_high")) else "n/a",
+                        "difference_auc": diff,
+                        "difference_ci": f"[{diff_low:.4f}, {diff_high:.4f}]",
+                        "difference_bootstrap_replicates_used": int(diff_n),
+                        "difference_bootstrap_replicates_skipped": int(diff_skipped),
+                    })
+            else:
+                camera_a = next((r for r in exp_rows if r["camera"] == ("Maestro2" if experiment_name == "B_maestro2_only" else "Triton")), None)
+                camera_b = next((r for r in exp_rows if r["camera"] == ("Triton" if experiment_name == "B_maestro2_only" else "Maestro2")), None)
+                if camera_a and camera_b:
+                    diff = float(camera_a["auc"]) - float(camera_b["auc"])
+                    camera_a_name = "Maestro2" if experiment_name == "B_maestro2_only" else "Triton"
+                    camera_b_name = "Triton" if experiment_name == "B_maestro2_only" else "Maestro2"
+                    m_a = np.asarray([row["probability"] for row in all_test_predictions if row["vector_set"] == vector_name and row["experiment"] == experiment_name and row["camera"] == camera_a_name], dtype=float)
+                    y_a = np.asarray([row["label"] for row in all_test_predictions if row["vector_set"] == vector_name and row["experiment"] == experiment_name and row["camera"] == camera_a_name], dtype=int)
+                    p_a = np.asarray([row["participant_id"] for row in all_test_predictions if row["vector_set"] == vector_name and row["experiment"] == experiment_name and row["camera"] == camera_a_name], dtype=int)
+                    m_b = np.asarray([row["probability"] for row in all_test_predictions if row["vector_set"] == vector_name and row["experiment"] == experiment_name and row["camera"] == camera_b_name], dtype=float)
+                    y_b = np.asarray([row["label"] for row in all_test_predictions if row["vector_set"] == vector_name and row["experiment"] == experiment_name and row["camera"] == camera_b_name], dtype=int)
+                    p_b = np.asarray([row["participant_id"] for row in all_test_predictions if row["vector_set"] == vector_name and row["experiment"] == experiment_name and row["camera"] == camera_b_name], dtype=int)
+                    diff_low, diff_high, diff_n, diff_skipped = _bootstrap_camera_auc_difference(y_a, m_a, p_a, y_b, m_b, p_b, n_boot=2000, seed=PAIRED_RANDOM_SEED)
+                    test_table_rows.append({
+                        "vector_set": vector_name,
+                        "trained_on": experiment_map.get(experiment_name, experiment_name),
+                        "maestro2_auc": camera_a["auc"] if camera_a["camera"] == "Maestro2" else camera_b["auc"],
+                        "maestro2_ci": f"[{(camera_a if camera_a['camera']=='Maestro2' else camera_b)['auc_ci_low']:.4f}, {(camera_a if camera_a['camera']=='Maestro2' else camera_b)['auc_ci_high']:.4f}]" if pd.notna((camera_a if camera_a['camera']=='Maestro2' else camera_b).get('auc_ci_low')) and pd.notna((camera_a if camera_a['camera']=='Maestro2' else camera_b).get('auc_ci_high')) else "n/a",
+                        "triton_auc": camera_b["auc"] if camera_b["camera"] == "Triton" else camera_a["auc"],
+                        "triton_ci": f"[{(camera_b if camera_b['camera']=='Triton' else camera_a)['auc_ci_low']:.4f}, {(camera_b if camera_b['camera']=='Triton' else camera_a)['auc_ci_high']:.4f}]" if pd.notna((camera_b if camera_b['camera']=='Triton' else camera_a).get('auc_ci_low')) and pd.notna((camera_b if camera_b['camera']=='Triton' else camera_a).get('auc_ci_high')) else "n/a",
+                        "difference_auc": diff,
+                        "difference_ci": f"[{diff_low:.4f}, {diff_high:.4f}]",
+                        "difference_bootstrap_replicates_used": int(diff_n),
+                        "difference_bootstrap_replicates_skipped": int(diff_skipped),
+                    })
+
+    if all_summary_rows:
+        summary_df = pd.DataFrame(all_summary_rows)
+        summary_path = os.path.join(PAIRED_RESULTS_FOLDER, f"cataract_{effective_concept_id}_stage2_summary.csv")
+        summary_df.to_csv(summary_path, index=False)
+        print(f"\nSaved downstream Stage 2 summary to: {summary_path}")
+        print("\nStage 2 per-camera summary")
+        print(summary_df[[
+            "vector_set",
+            "experiment",
+            "trained_on",
+            "camera",
+            "n_test_eyes",
+            "n_participants",
+            "n_positive_participants",
+            "auc",
+            "auc_ci_low",
+            "auc_ci_high",
+            "balanced_accuracy",
+            "accuracy",
+            "sensitivity",
+            "specificity",
+            "threshold",
+            "bootstrap_replicates_used",
+            "bootstrap_replicates_skipped",
+        ]].to_string(index=False))
+
+    if all_test_predictions:
+        pred_path = os.path.join(PAIRED_RESULTS_FOLDER, f"cataract_{effective_concept_id}_stage2_test_predictions.csv")
+        pd.DataFrame(all_test_predictions).to_csv(pred_path, index=False)
+        print(f"Saved stage-2 per-image predictions to: {pred_path}")
+
+    if same_eye_results:
+        agreement_table = pd.DataFrame(list(same_eye_results.values()))
+        print("\nTable 2: same-eye agreement (experiment A)")
+        print(agreement_table[[
+            "vector_set",
+            "pearson_r",
+            "spearman_r",
+            "mean_abs_diff",
+            "same_predicted_class_at_validation_threshold_pct",
+            "same_predicted_class_at_0_5_pct",
+            "n_eyes",
+            "validation_threshold",
+        ]].to_string(index=False))
+
+    if test_table_rows:
+        table_df = pd.DataFrame(test_table_rows)
+        print("\nTable 1: test-set camera AUC comparison")
+        print(table_df[[
+            "vector_set",
+            "trained_on",
+            "maestro2_auc",
+            "maestro2_ci",
+            "triton_auc",
+            "triton_ci",
+            "difference_auc",
+            "difference_ci",
+            "difference_bootstrap_replicates_used",
+            "difference_bootstrap_replicates_skipped",
+        ]].to_string(index=False))
+
+    return pd.DataFrame(all_summary_rows)
+
+
+def run_downstream_condition_stage_2(
+    condition_concept_id: int = 4317977,
+    condition_label: str = "cataract",
+    stage: int = 2,
+) -> pd.DataFrame:
+    """Run the Stage 2 downstream test-set evaluation with logging and saved-run manifests."""
+    result = run_with_logging(_run_downstream_stage_2, condition_concept_id, condition_label, stage)
+    print("\nSaved downstream Stage 2 analysis with paired_analyses prefix in saved_runs.")
     return result
 
 
@@ -830,12 +1400,21 @@ def _handle_cli() -> None:
     args = parser.parse_args()
 
     if args.analysis == "downstream":
-        run_downstream_condition_stage_1(
-            condition_concept_id=DOWNSTREAM_CONDITION_MAP[_normalize_condition_label(args.label)]["concept_id"],
-            condition_label=_normalize_condition_label(args.label),
-            stage=args.stage,
-        )
-        return
+        if args.stage == 1:
+            run_downstream_condition_stage_1(
+                condition_concept_id=DOWNSTREAM_CONDITION_MAP[_normalize_condition_label(args.label)]["concept_id"],
+                condition_label=_normalize_condition_label(args.label),
+                stage=args.stage,
+            )
+            return
+        if args.stage == 2:
+            run_downstream_condition_stage_2(
+                condition_concept_id=DOWNSTREAM_CONDITION_MAP[_normalize_condition_label(args.label)]["concept_id"],
+                condition_label=_normalize_condition_label(args.label),
+                stage=args.stage,
+            )
+            return
+        raise ValueError("This file only supports downstream Stage 1 and Stage 2.")
 
     if args.analysis == "pairing":
         run_paired_analyses_cli()

@@ -371,7 +371,7 @@ if __name__ == "__main__":
     if args.train_filter_classes is not None:
         train_classes = args.train_filter_classes
     else:
-        train_classes = train_classes_1
+        train_classes = train_classes_3
 
     if not args.train_filter_classes and not args.eval_filter_classes:
         run_with_logging(
